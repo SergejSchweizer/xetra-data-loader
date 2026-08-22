@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import socket
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -237,9 +238,23 @@ def execute_production_full_sync_and_verify(
 ) -> ProductionAcceptanceReport:
     """Destructively bootstrap the real target, replay unchanged state, and verify independently."""
 
+    preflight = connect_postgres()
+    try:
+        preflight.autocommit = True
+        _, _, _, target_matches = _verify_target(preflight)
+        if not target_matches:
+            raise ProductionVerificationError(
+                f"XDL_POSTGRES_DSN must resolve exactly to {EXPECTED_HOST}:{EXPECTED_PORT}"
+            )
+    finally:
+        preflight.close()
+
     initial_runtime = PostgresEodhdBootstrapRuntime.from_environment()
     try:
         initial = run_full_bootstrap(initial_runtime, confirmed=True, reset_owned_state=True)
+        # The bootstrap schema initializer runs after the reset transaction. Explicitly commit
+        # its outer transaction so a fresh verification connection can prove durable state.
+        initial_runtime._connection.commit()
     finally:
         initial_runtime.close()
 
@@ -613,6 +628,12 @@ def _verify_timestamps(connection: Connection[Any]) -> TimestampVerification:
 
 
 def _verify_app_role(connection: Connection[Any]) -> RoleVerification:
+    select_tables: dict[str, bool] = {dataset: False for dataset in DATASETS}
+    insert_denied = False
+    update_denied = False
+    delete_denied = False
+    ddl_denied = False
+    sync_denied = False
     cursor = connection.cursor()
     cursor.execute("BEGIN")
     try:
@@ -653,6 +674,8 @@ def _verify_app_role(connection: Connection[Any]) -> RoleVerification:
             "SELECT 1 FROM portfell_loader_sync.sync_state LIMIT 0",
             "sync_probe",
         )
+    except Error:
+        pass
     finally:
         cursor.execute("ROLLBACK")
         cursor.close()
@@ -727,7 +750,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 2
 
-    medallion_root_value = __import__("os").getenv("XDL_MEDALLION_ROOT")
+    medallion_root_value = os.getenv("XDL_MEDALLION_ROOT")
     if medallion_root_value is None or not medallion_root_value.strip():
         raise ValueError("XDL_MEDALLION_ROOT is required")
     report = execute_production_full_sync_and_verify(
