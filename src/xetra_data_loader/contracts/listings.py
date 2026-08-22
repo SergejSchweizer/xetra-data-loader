@@ -43,6 +43,8 @@ def normalize_listing(provider_row: Mapping[str, object]) -> ListingRecord | Non
 
     isin = _optional_text(provider_row.get("ISIN"))
     if isin is None:
+        isin = _optional_text(provider_row.get("Isin"))
+    if isin is None:
         return None
     exchange = _required_text("Exchange", provider_row.get("Exchange"))
     code = _required_text("Code", provider_row.get("Code"))

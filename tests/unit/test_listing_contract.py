@@ -17,6 +17,13 @@ def test_only_missing_or_empty_isin_is_excluded() -> None:
     assert records[0].isin == "DE0000000001"
 
 
+def test_provider_title_case_isin_is_normalized() -> None:
+    records = normalize_listings(
+        [{"Isin": " de0000000003 ", "Exchange": "XETRA", "Code": "TITLECASE"}]
+    )
+    assert [record.key for record in records] == [("DE0000000003", "XETRA", "TITLECASE")]
+
+
 def test_duplicate_isin_with_distinct_code_is_retained() -> None:
     rows = [
         {"ISIN": "DE0000000001", "Exchange": "XETRA", "Code": "BBB"},

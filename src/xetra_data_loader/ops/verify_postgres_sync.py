@@ -377,7 +377,10 @@ def semantic_fingerprint(
 ) -> str:
     """Recompute the exact Gold-builder semantic fingerprint for serving rows."""
 
-    ordered = [dict(row) for row in sorted(rows, key=lambda row: _business_key(dataset, row))]
+    ordered: list[JSONValue] = [
+        cast(JSONValue, dict(row))
+        for row in sorted(rows, key=lambda row: _business_key(dataset, row))
+    ]
     payload: JSONValue
     if dataset in {"dividends", "splits"}:
         payload = {"rows": ordered, "retracted_keys": []}
@@ -401,7 +404,7 @@ def _verify_target(connection: Connection[Any]) -> tuple[str, int, tuple[str, ..
         addresses = tuple(
             sorted(
                 {
-                    entry[4][0]
+                    str(entry[4][0])
                     for entry in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
                 }
             )
