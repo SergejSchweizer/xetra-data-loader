@@ -11,6 +11,16 @@ from psycopg import Connection, Cursor
 from xetra_data_loader.gold.dividends import DividendGoldResult
 from xetra_data_loader.sync.core import JSONValue, SyncCounters, SyncOutcome, run_sync
 
+DividendSemantic = tuple[
+    date,
+    date | None,
+    date | None,
+    date | None,
+    Decimal,
+    str | None,
+    str | None,
+]
+
 
 def sync_dividends(
     connection: Connection[Any],
@@ -50,25 +60,13 @@ def sync_dividends(
 
         for event in gold.rows:
             cursor.execute(
-                "SELECT event_date, declaration_date, record_date, payment_date, value, currency, period "
-                "FROM portfell_market.dividends "
+                "SELECT event_date, declaration_date, record_date, payment_date, value, "
+                "currency, period FROM portfell_market.dividends "
                 "WHERE isin = %s AND exchange = %s AND code = %s AND event_key = %s",
                 event.key,
             )
-            existing = cast(
-                tuple[
-                    date,
-                    date | None,
-                    date | None,
-                    date | None,
-                    Decimal,
-                    str | None,
-                    str | None,
-                ]
-                | None,
-                cursor.fetchone(),
-            )
-            semantic = (
+            existing = cast(DividendSemantic | None, cursor.fetchone())
+            semantic: DividendSemantic = (
                 event.event_date,
                 event.declaration_date,
                 event.record_date,
@@ -107,5 +105,6 @@ def sync_dividends(
 
 
 def _require_utc(value: datetime) -> None:
-    if value.tzinfo is None or value.utcoffset() is None or value.utcoffset() != UTC.utcoffset(value):
+    offset = value.utcoffset()
+    if value.tzinfo is None or offset is None or offset != UTC.utcoffset(value):
         raise ValueError("published_at_utc must be timezone-aware UTC")
