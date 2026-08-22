@@ -8,7 +8,11 @@ DSN = os.getenv("XDL_TEST_POSTGRES_DSN")
 pytestmark = pytest.mark.integration
 
 
-def _psql(*arguments: str, input_text: str | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
+def _psql(
+    *arguments: str,
+    input_text: str | None = None,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
     if DSN is None:
         pytest.skip("XDL_TEST_POSTGRES_DSN is not configured")
     return subprocess.run(
