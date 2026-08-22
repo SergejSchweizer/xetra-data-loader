@@ -8,7 +8,7 @@ import json
 import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import cast
 
 from xetra_data_loader.sync.core import JSONValue
 
