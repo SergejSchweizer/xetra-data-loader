@@ -12,5 +12,34 @@ authors = [{ name = "Sergej Schweizer" }]
 license = { text = "Proprietary" }
 dependencies = []
 
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.17",
+  "pytest>=8.4",
+  "pytest-cov>=6.2",
+  "ruff>=0.12",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/xetra_data_loader"]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+src = ["src", "scripts", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+mypy_path = "src"
+packages = ["xetra_data_loader"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers"
+testpaths = ["tests"]
+markers = [
+  "integration: tests that exercise external service boundaries or a real PostgreSQL instance",
+]
