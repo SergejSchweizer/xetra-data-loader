@@ -14,6 +14,9 @@ dependencies = [
   "psycopg[binary]>=3.2",
 ]
 
+[project.scripts]
+xdl-weekly = "xetra_data_loader.pipeline.orchestrator:main"
+
 [project.optional-dependencies]
 dev = [
   "mypy>=1.17",
