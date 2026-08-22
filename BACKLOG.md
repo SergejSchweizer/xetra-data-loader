@@ -356,7 +356,7 @@ Acceptance: second concurrent run denied; failed run recovers; restart produces 
 ### PR029 — xdl-pr029-sunday-1100-schedule
 Branch `feat/xdl-pr029-sunday-1100-schedule`; commit scope `feat(xdl-pr029-sunday-1100-schedule): ...`; depends on PR027.
 Owned paths: cron/scheduler deployment config + tests.
-Tasks: literal `CRON_TZ=Europe/Vienna`; literal `0 12 * * 0`; invoke weekly runner; DST tests.
+Tasks: literal `CRON_TZ=Europe/Vienna`; literal `0 12 * * 0`; invoke the full guarded bootstrap; DST tests.
 Acceptance: expression exact and remains Sunday 12:00 Vienna before/after DST; no pipeline business code changed.
 
 ### PR030 — xdl-pr030-destructive-reset-guard

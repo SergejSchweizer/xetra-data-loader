@@ -10,7 +10,8 @@ def test_cron_contract_is_exact_sunday_1200_vienna() -> None:
 
     assert lines[0] == "CRON_TZ=Europe/Vienna"
     assert lines[1].startswith("0 12 * * 0 ")
-    assert "xdl-weekly" in lines[1]
+    assert "xdl-bootstrap --confirm-destructive-reset" in lines[1]
+    assert ".data/medallion/bootstrap.lock" in lines[1]
 
 
 def test_vienna_1200_remains_local_1200_across_dst() -> None:
