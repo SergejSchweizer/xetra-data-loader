@@ -1,12 +1,11 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
 
 from xetra_data_loader.market import DividendRow, ListingRow, QuoteRow
 
-
-UTC_NOW = datetime(2026, 8, 22, 20, 0, tzinfo=timezone.utc)
+UTC_NOW = datetime(2026, 8, 22, 20, 0, tzinfo=UTC)
 
 
 def test_listing_rejects_naive_datetime() -> None:
@@ -27,7 +26,7 @@ def test_quote_requires_utc_midnight_anchor() -> None:
             exchange="XETRA",
             code="AAA",
             trade_date=date(2026, 8, 22),
-            timestamp_eod=datetime(2026, 8, 22, 17, 30, tzinfo=timezone.utc),
+            timestamp_eod=datetime(2026, 8, 22, 17, 30, tzinfo=UTC),
             close=Decimal("10.25"),
             fetched_at_utc=UTC_NOW,
             published_at_utc=UTC_NOW,
