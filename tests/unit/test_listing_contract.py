@@ -1,0 +1,40 @@
+from xetra_data_loader.contracts.listings import (
+    deserialize_listings,
+    normalize_listings,
+    serialize_listings,
+)
+
+
+def test_only_missing_or_empty_isin_is_excluded() -> None:
+    rows = [
+        {"ISIN": " de0000000001 ", "Exchange": "XETRA", "Code": "AAA", "Type": "ETF"},
+        {"ISIN": "", "Exchange": "XETRA", "Code": "EMPTY"},
+        {"ISIN": None, "Exchange": "XETRA", "Code": "NONE"},
+        {"ISIN": "DE0000000002", "Exchange": "XETRA", "Code": "STOCK", "Type": "Common Stock"},
+    ]
+    records = normalize_listings(rows)
+    assert [record.code for record in records] == ["AAA", "STOCK"]
+    assert records[0].isin == "DE0000000001"
+
+
+def test_duplicate_isin_with_distinct_code_is_retained() -> None:
+    rows = [
+        {"ISIN": "DE0000000001", "Exchange": "XETRA", "Code": "BBB"},
+        {"ISIN": "DE0000000001", "Exchange": "XETRA", "Code": "AAA"},
+    ]
+    records = normalize_listings(rows)
+    assert [record.key for record in records] == [
+        ("DE0000000001", "XETRA", "AAA"),
+        ("DE0000000001", "XETRA", "BBB"),
+    ]
+
+
+def test_round_trip_and_order_are_deterministic() -> None:
+    rows = [
+        {"ISIN": "DE0000000002", "Exchange": "XETRA", "Code": "BBB", "Name": "B"},
+        {"ISIN": "DE0000000001", "Exchange": "XETRA", "Code": "AAA", "Name": "A"},
+    ]
+    records = normalize_listings(rows)
+    payload = serialize_listings(reversed(records))
+    assert deserialize_listings(payload) == records
+    assert serialize_listings(deserialize_listings(payload)) == payload
