@@ -59,7 +59,7 @@ def connect_postgres(dsn: str | None = None) -> Connection[Any]:
     resolved = dsn if dsn is not None else os.getenv("XDL_POSTGRES_DSN")
     if resolved is None or not resolved.strip():
         raise ValueError("XDL_POSTGRES_DSN is required")
-    return cast(Connection[Any], psycopg.connect(resolved, autocommit=False))
+    return psycopg.connect(resolved, autocommit=False)
 
 
 def semantic_fingerprint(rows: Iterable[SemanticRow]) -> tuple[str, int]:
@@ -88,53 +88,52 @@ def run_sync(
     clock = now or (lambda: datetime.now(UTC))
     started_at = _require_utc(clock())
 
-    with connection.transaction():
-        with connection.cursor() as cursor:
-            cursor.execute("SET LOCAL TIME ZONE 'UTC'")
-            cursor.execute(
-                "SELECT semantic_fingerprint, row_count "
-                "FROM portfell_loader_sync.sync_state WHERE dataset = %s FOR UPDATE",
-                (dataset,),
-            )
-            raw_state = cursor.fetchone()
-            state = cast(tuple[str, int] | None, raw_state)
-            is_noop = state is not None and state[0] == fingerprint and state[1] == row_count
+    with connection.transaction(), connection.cursor() as cursor:
+        cursor.execute("SET LOCAL TIME ZONE 'UTC'")
+        cursor.execute(
+            "SELECT semantic_fingerprint, row_count "
+            "FROM portfell_loader_sync.sync_state WHERE dataset = %s FOR UPDATE",
+            (dataset,),
+        )
+        raw_state = cursor.fetchone()
+        state = cast(tuple[str, int] | None, raw_state)
+        is_noop = state is not None and state[0] == fingerprint and state[1] == row_count
 
-            counters = SyncCounters() if is_noop else mutate(cursor)
-            if not is_noop:
-                cursor.execute(
-                    "INSERT INTO portfell_loader_sync.sync_state "
-                    "(dataset, semantic_fingerprint, row_count, synced_at_utc) "
-                    "VALUES (%s, %s, %s, %s) "
-                    "ON CONFLICT (dataset) DO UPDATE SET "
-                    "semantic_fingerprint = EXCLUDED.semantic_fingerprint, "
-                    "row_count = EXCLUDED.row_count, "
-                    "synced_at_utc = EXCLUDED.synced_at_utc",
-                    (dataset, fingerprint, row_count, started_at),
-                )
-
-            finished_at = _require_utc(clock())
-            status = "noop" if is_noop else "applied"
+        counters = SyncCounters() if is_noop else mutate(cursor)
+        if not is_noop:
             cursor.execute(
-                "INSERT INTO portfell_loader_sync.loader_runs "
-                "(run_id, dataset, semantic_fingerprint, row_count, inserted_count, "
-                "updated_count, deleted_count, retracted_count, started_at_utc, "
-                "finished_at_utc, status) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                (
-                    resolved_run_id,
-                    dataset,
-                    fingerprint,
-                    row_count,
-                    counters.inserted,
-                    counters.updated,
-                    counters.deleted,
-                    counters.retracted,
-                    started_at,
-                    finished_at,
-                    status,
-                ),
+                "INSERT INTO portfell_loader_sync.sync_state "
+                "(dataset, semantic_fingerprint, row_count, synced_at_utc) "
+                "VALUES (%s, %s, %s, %s) "
+                "ON CONFLICT (dataset) DO UPDATE SET "
+                "semantic_fingerprint = EXCLUDED.semantic_fingerprint, "
+                "row_count = EXCLUDED.row_count, "
+                "synced_at_utc = EXCLUDED.synced_at_utc",
+                (dataset, fingerprint, row_count, started_at),
             )
+
+        finished_at = _require_utc(clock())
+        status = "noop" if is_noop else "applied"
+        cursor.execute(
+            "INSERT INTO portfell_loader_sync.loader_runs "
+            "(run_id, dataset, semantic_fingerprint, row_count, inserted_count, "
+            "updated_count, deleted_count, retracted_count, started_at_utc, "
+            "finished_at_utc, status) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                resolved_run_id,
+                dataset,
+                fingerprint,
+                row_count,
+                counters.inserted,
+                counters.updated,
+                counters.deleted,
+                counters.retracted,
+                started_at,
+                finished_at,
+                status,
+            ),
+        )
 
     return SyncOutcome(
         run_id=resolved_run_id,
