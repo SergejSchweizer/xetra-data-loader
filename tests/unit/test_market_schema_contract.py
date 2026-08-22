@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 SCHEMA = Path("sql/schema/001_portfell_market.sql")
 
 
