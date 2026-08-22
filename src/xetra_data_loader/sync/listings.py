@@ -33,7 +33,10 @@ def sync_listings(
                 "WHERE isin = %s AND exchange = %s AND code = %s",
                 row.key,
             )
-            existing = cast(tuple[str | None, str | None, str | None, str | None] | None, cursor.fetchone())
+            existing = cast(
+                tuple[str | None, str | None, str | None, str | None] | None,
+                cursor.fetchone(),
+            )
             semantic = (row.name, row.instrument_type, row.currency, row.country)
             if existing is None:
                 cursor.execute(
@@ -64,5 +67,6 @@ def sync_listings(
 
 
 def _require_utc(value: datetime) -> None:
-    if value.tzinfo is None or value.utcoffset() is None or value.utcoffset() != UTC.utcoffset(value):
+    offset = value.utcoffset()
+    if value.tzinfo is None or offset is None or offset != UTC.utcoffset(value):
         raise ValueError("published_at_utc must be timezone-aware UTC")
