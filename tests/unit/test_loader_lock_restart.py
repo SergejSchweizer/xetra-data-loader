@@ -54,10 +54,9 @@ def _stages(calls: Counter[str], fail_once: set[str]) -> PipelineStages:
 def test_second_concurrent_run_is_denied_and_lock_releases(tmp_path: Path) -> None:
     lock_path = tmp_path / "loader.lock"
 
-    with LoaderLock(lock_path):
-        with pytest.raises(ConcurrentLoaderRunError):
-            with LoaderLock(lock_path):
-                raise AssertionError("unreachable")
+    with LoaderLock(lock_path), pytest.raises(ConcurrentLoaderRunError):
+        with LoaderLock(lock_path):
+            raise AssertionError("unreachable")
 
     with LoaderLock(lock_path):
         pass
