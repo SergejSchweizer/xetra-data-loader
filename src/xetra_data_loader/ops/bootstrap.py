@@ -6,11 +6,11 @@ import argparse
 import json
 import os
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any, Generic, Protocol, TypeVar, cast
+from typing import Any, Protocol, cast
 from urllib.request import Request, urlopen
 
 from psycopg import Connection
@@ -35,8 +35,6 @@ from xetra_data_loader.sync.dividends import sync_dividends
 from xetra_data_loader.sync.listings import sync_listings
 from xetra_data_loader.sync.quotes import sync_quotes
 from xetra_data_loader.sync.splits import sync_splits
-
-T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,7 +70,7 @@ class FetchMetrics:
 
 
 @dataclass(frozen=True, slots=True)
-class FetchBatch(Generic[T]):
+class FetchBatch[T]:
     rows: tuple[T, ...]
     metrics: FetchMetrics
 
@@ -153,13 +151,9 @@ class BootstrapRuntime(Protocol):
     """Provider, persistence, publication, and verification boundary for bootstrap."""
 
     def reset_owned_state(self) -> None: ...
-
     def fetch_listings(self) -> FetchBatch[ListingRecord]: ...
-
     def fetch_quotes(self, listing: ListingRecord) -> FetchBatch[QuoteRecord]: ...
-
     def fetch_dividends(self, listing: ListingRecord) -> FetchBatch[DividendEvent]: ...
-
     def fetch_splits(self, listing: ListingRecord) -> FetchBatch[SplitEvent]: ...
 
     def persist_gold(
@@ -172,11 +166,8 @@ class BootstrapRuntime(Protocol):
     ) -> None: ...
 
     def publish_listings(self, gold: ListingGoldResult) -> SyncOutcome: ...
-
     def publish_quotes(self, gold: QuoteGoldResult) -> SyncOutcome: ...
-
     def publish_dividends(self, gold: DividendGoldResult) -> SyncOutcome: ...
-
     def publish_splits(self, gold: SplitGoldResult) -> SyncOutcome: ...
 
     def verify(
@@ -224,31 +215,7 @@ def run_full_bootstrap(
     quote_gold = build_quote_gold(quotes)
     dividend_gold = build_dividend_gold(dividends)
     split_gold = build_split_gold(splits)
-
-    runtime.persist_gold(
-        "listings",
-        listing_gold.semantic_rows(),
-        row_count=listing_gold.row_count,
-        semantic_fingerprint=listing_gold.semantic_fingerprint,
-    )
-    runtime.persist_gold(
-        "eod_quotes",
-        quote_gold.semantic_rows(),
-        row_count=quote_gold.row_count,
-        semantic_fingerprint=quote_gold.semantic_fingerprint,
-    )
-    runtime.persist_gold(
-        "dividends",
-        dividend_gold.semantic_rows(),
-        row_count=dividend_gold.row_count,
-        semantic_fingerprint=dividend_gold.semantic_fingerprint,
-    )
-    runtime.persist_gold(
-        "splits",
-        split_gold.semantic_rows(),
-        row_count=split_gold.row_count,
-        semantic_fingerprint=split_gold.semantic_fingerprint,
-    )
+    _persist_all_gold(runtime, listing_gold, quote_gold, dividend_gold, split_gold)
 
     sync_outcomes = {
         "listings": runtime.publish_listings(listing_gold),
@@ -275,6 +242,47 @@ def run_full_bootstrap(
         sync_outcomes=sync_outcomes,
         verification=verification,
     )
+
+
+def _persist_all_gold(
+    runtime: BootstrapRuntime,
+    listings: ListingGoldResult,
+    quotes: QuoteGoldResult,
+    dividends: DividendGoldResult,
+    splits: SplitGoldResult,
+) -> None:
+    for dataset, rows, count, fingerprint in (
+        (
+            "listings",
+            listings.semantic_rows(),
+            listings.row_count,
+            listings.semantic_fingerprint,
+        ),
+        (
+            "eod_quotes",
+            quotes.semantic_rows(),
+            quotes.row_count,
+            quotes.semantic_fingerprint,
+        ),
+        (
+            "dividends",
+            dividends.semantic_rows(),
+            dividends.row_count,
+            dividends.semantic_fingerprint,
+        ),
+        (
+            "splits",
+            splits.semantic_rows(),
+            splits.row_count,
+            splits.semantic_fingerprint,
+        ),
+    ):
+        runtime.persist_gold(
+            dataset,
+            rows,
+            row_count=count,
+            semantic_fingerprint=fingerprint,
+        )
 
 
 class _AttemptCounter:
@@ -439,9 +447,11 @@ class PostgresEodhdBootstrapRuntime:
         split_gold: SplitGoldResult,
         sync_outcomes: Mapping[str, SyncOutcome],
     ) -> BootstrapVerification:
-        expected_keys = {
+        expected_keys: dict[str, set[tuple[str, ...]]] = {
             "listings": {tuple(row.key) for row in listing_gold.rows},
-            "eod_quotes": {tuple(str(value) for value in row.key) for row in quote_gold.rows},
+            "eod_quotes": {
+                tuple(str(value) for value in row.key) for row in quote_gold.rows
+            },
             "dividends": {tuple(row.key) for row in dividend_gold.rows},
             "splits": {tuple(row.key) for row in split_gold.rows},
         }
@@ -460,7 +470,10 @@ class PostgresEodhdBootstrapRuntime:
             "splits": (split_gold.row_count, self._count("splits")),
         }
         key_differences = {
-            name: (len(expected_keys[name] - actual_keys[name]), len(actual_keys[name] - expected_keys[name]))
+            name: (
+                len(expected_keys[name] - actual_keys[name]),
+                len(actual_keys[name] - expected_keys[name]),
+            )
             for name in expected_keys
         }
         date_bounds_match = {
@@ -540,7 +553,10 @@ class PostgresEodhdBootstrapRuntime:
     def _write_layer(self, layer: Layer, dataset: str, payload: JSONValue) -> None:
         directory = self._layout.dataset_path(layer, dataset)
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / "data.json").write_text(canonical_json(payload) + "\n", encoding="utf-8")
+        (directory / "data.json").write_text(
+            canonical_json(payload) + "\n",
+            encoding="utf-8",
+        )
 
     def _count(self, table: str) -> int:
         row = self._connection.execute(
@@ -589,7 +605,7 @@ def _split_silver(event: SplitEvent) -> dict[str, JSONValue]:
     return row
 
 
-def _bounds(values: Sequence[date] | Any) -> tuple[date | None, date | None]:
+def _bounds(values: Iterable[date]) -> tuple[date | None, date | None]:
     materialized = tuple(values)
     if not materialized:
         return None, None
