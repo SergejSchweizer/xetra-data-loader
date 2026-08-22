@@ -9,9 +9,17 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
+from typing import TextIO
 
-from xetra_data_loader.pipeline.orchestrator import PipelineStages, PipelineSummary, run_weekly_pipeline
+from xetra_data_loader.pipeline.orchestrator import (
+    PipelineStages,
+    PipelineSummary,
+    run_weekly_pipeline,
+)
 from xetra_data_loader.sync.core import JSONValue
+
+type RestartStage = Callable[[], Mapping[str, JSONValue] | None]
+type WrappedStage = Callable[[], dict[str, JSONValue]]
 
 _STAGE_NAMES = (
     "listings",
@@ -33,10 +41,10 @@ class ConcurrentLoaderRunError(RuntimeError):
 
 @dataclass(slots=True)
 class LoaderLock(AbstractContextManager["LoaderLock"]):
-    """Advisory process lock that is automatically released on exit or process death."""
+    """Advisory process lock automatically released on exit or process death."""
 
     path: Path
-    _handle: object | None = None
+    _handle: TextIO | None = None
 
     def __enter__(self) -> LoaderLock:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -61,9 +69,8 @@ class LoaderLock(AbstractContextManager["LoaderLock"]):
     ) -> None:
         handle = self._handle
         if handle is not None:
-            typed_handle = handle
-            fcntl.flock(typed_handle.fileno(), fcntl.LOCK_UN)
-            typed_handle.close()
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            handle.close()
             self._handle = None
         return None
 
@@ -89,7 +96,7 @@ def _wrap_stages(
     completed: set[str],
     checkpoint_path: Path,
 ) -> PipelineStages:
-    def wrap(name: str, stage: Callable[[], Mapping[str, JSONValue] | None]) -> Callable[[], dict[str, JSONValue]]:
+    def wrap(name: str, stage: RestartStage) -> WrappedStage:
         def run() -> dict[str, JSONValue]:
             if name in completed:
                 return {"restart": "checkpoint-skip"}
@@ -121,7 +128,9 @@ def _read_checkpoint(path: Path) -> set[str]:
     if not isinstance(payload, dict) or payload.get("version") != 1:
         raise ValueError("invalid loader checkpoint")
     raw_completed = payload.get("completed")
-    if not isinstance(raw_completed, list) or not all(isinstance(item, str) for item in raw_completed):
+    if not isinstance(raw_completed, list) or not all(
+        isinstance(item, str) for item in raw_completed
+    ):
         raise ValueError("invalid loader checkpoint completed stages")
     completed = set(raw_completed)
     if not completed.issubset(_STAGE_NAMES):
