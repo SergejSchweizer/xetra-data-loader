@@ -1,0 +1,2 @@
+CRON_TZ=Europe/Vienna
+0 11 * * 0 /usr/bin/env xdl-weekly --factory xetra_data_loader.pipeline.runtime:build_weekly_stages
