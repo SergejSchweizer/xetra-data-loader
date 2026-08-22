@@ -97,6 +97,9 @@ def test_quote_sync_initial_replay_correction_and_new_date() -> None:
         )
         assert extended.counters.inserted == 1
         assert extended.counters.updated == 0
-        assert connection.execute("SELECT count(*) FROM portfell_market.eod_quotes").fetchone() == (2,)
+        quote_count = connection.execute(
+            "SELECT count(*) FROM portfell_market.eod_quotes"
+        ).fetchone()
+        assert quote_count == (2,)
     finally:
         connection.close()
