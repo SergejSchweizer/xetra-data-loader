@@ -46,6 +46,48 @@ SergejSchweizer/portfell
 
 `xetra-data-loader` must not contain portfolio optimization, univariate/bivariate/multivariate analytics, Portfell UI, users/tenants/projects, or Portfell application authorization.
 
+## Python and repository engineering baseline
+
+The repository standard is frozen before feature implementation starts:
+
+- production/development Python is **CPython 3.14.7**, the latest stable Python release at this backlog revision; prerelease Python 3.15 release candidates are not used;
+- `.python-version`, `pyproject.toml`, local setup documentation, and GitHub Actions must all resolve to the same Python 3.14.7 baseline;
+- local setup creates a repository-local `.venv` from Python 3.14.7; `.venv/` is always ignored by Git and must never be committed;
+- `main` is a protected branch: no direct feature pushes, no force pushes, and no deletion;
+- every change after the bootstrap/protection setup reaches `main` through a pull request;
+- repository auto-merge is enabled, and implementation PRs are placed into auto-merge after they are review-ready; GitHub may merge them only after the required merge gate is green;
+- a **push quality gate** runs on implementation-branch pushes;
+- a **merge quality gate** runs on pull requests targeting `main`;
+- both quality gates execute `lint`, `type`, `unit`, and `integration` as independent parallel jobs;
+- the merge workflow has a final required `merge-gate` aggregation job that succeeds only when every required parallel job and repository-policy check succeeds;
+- `main` branch protection requires the `merge-gate` status check before merge;
+- all commit messages use Conventional Commits;
+- every work-order PR name appears literally in its branch name and in every commit message on that work-order branch;
+- every PR title contains the exact work-order name;
+- CI validates Conventional Commit syntax, branch/work-order naming, commit/work-order naming, and PR-title/work-order naming so these rules cannot rely only on agent discipline.
+
+Required workflow shape:
+
+```text
+push to work-order branch
+  |-- lint -----------\
+  |-- type ------------+--> push-gate
+  |-- unit ------------+
+  |-- integration -----/
+  `-- policy ----------/
+
+pull request -> main
+  |-- lint -----------\
+  |-- type ------------+
+  |-- unit ------------+--> merge-gate [required by main protection]
+  |-- integration -----+
+  `-- policy ----------/
+                              |
+                              `--> auto-merge may complete
+```
+
+The four code-quality jobs must run in parallel. `policy` is a separate fast repository-governance check and must not serialize `lint`, `type`, `unit`, or `integration`.
+
 ## PostgreSQL contract
 
 Production endpoint: `10.10.1.3:54321`, supplied only through configuration/secrets. Passwords and full DSNs must never be committed.
@@ -122,7 +164,7 @@ This means Sunday at 11:00 Vienna local time, including daylight-saving transiti
 
 ## Git and weak-agent contract
 
-Every implementation work order uses the exact work-order name in its branch name, every commit message, and the PR title.
+Every implementation work order uses the exact work-order name in its branch name, every commit message, and the PR title. Every commit must also be a valid Conventional Commit.
 
 Example:
 
@@ -130,8 +172,10 @@ Example:
 Work-order: pr301-eod-quote-ingestion
 Branch:     feat/pr301-eod-quote-ingestion
 Commit:     feat(pr301-eod-quote-ingestion): add deterministic eod quote ingestion
-PR title:   must contain pr301-eod-quote-ingestion
+PR title:   feat(pr301-eod-quote-ingestion): add deterministic eod quote ingestion
 ```
+
+Allowed Conventional Commit types include `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `ci`, and `build`. The Conventional Commit scope for implementation commits is the exact work-order name unless a documented tooling constraint requires an equivalent machine-checkable representation.
 
 Before editing, every agent records:
 
@@ -142,10 +186,16 @@ git status --short --branch
 Rules:
 
 - start from a clean tree and the exact merged dependency SHA;
+- create/use only the branch named in the active work-order table;
 - parallel sibling work orders start from the same predecessor merge SHA;
 - never branch from a sibling work-order branch;
 - if a dependency is not merged, remain blocked;
 - do not add compatibility shims, legacy fallbacks, or unrelated refactors;
+- every commit must pass the Conventional Commit and work-order-name policy;
+- every push must pass the push quality gate on its exact head SHA;
+- every PR to `main` must pass the merge quality gate on the exact auto-merge head SHA;
+- agents must enable/request auto-merge after a PR is review-ready rather than manually merging around the gate;
+- direct feature pushes to protected `main` are forbidden after PR297 completes branch protection;
 - run focused tests and the repository quality gate on the same head SHA;
 - if owned paths overlap unexpectedly, stop and return the conflict to backlog planning.
 
@@ -167,13 +217,13 @@ PR297 -> PR298 -> PR299
                 PR307
 ```
 
-PR300, PR301, and PR302 are the primary safe parallel wave.
+PR297 establishes Python, `.venv`, repository policy, CI quality gates, protected `main`, and auto-merge before any feature work starts. PR300, PR301, and PR302 are the primary safe parallel wave.
 
 ## Active work orders
 
 | Key | Work-order name | Branch | Depends on | Atomic outcome | Git status |
 | --- | --- | --- | --- | --- | --- |
-| PR297 | `pr297-loader-repository-bootstrap` | `chore/pr297-loader-repository-bootstrap` | initial `main` backlog commit | bootstrap strict loader repository skeleton | not started; branch absent |
+| PR297 | `pr297-loader-repository-bootstrap` | `chore/pr297-loader-repository-bootstrap` | initial `main` backlog commit | bootstrap Python 3.14.7 repository, `.venv` setup, CI/policy gates, protected-main/auto-merge governance, and package skeleton | not started; branch absent |
 | PR298 | `pr298-postgres-serving-contract` | `feat/pr298-postgres-serving-contract` | PR297 | freeze PostgreSQL schema, roles, DTOs, UTC/`TIMESTAMPTZ(6)` contract | not started; branch absent; blocked |
 | PR299 | `pr299-medallion-dataset-contracts` | `feat/pr299-medallion-dataset-contracts` | PR298 | freeze Bronze/Silver/Gold datasets, keys, paths, manifests | not started; branch absent; blocked |
 | PR300 | `pr300-xetra-listing-ingestion` | `feat/pr300-xetra-listing-ingestion` | PR299 | ingest all XETRA listings with non-empty ISIN | not started; branch absent; blocked |
@@ -195,27 +245,54 @@ Required commit scope: `chore(pr297-loader-repository-bootstrap): ...`
 
 Git status: not started; branch absent.
 
-Atomic outcome: create the minimum production-grade Python repository skeleton needed by later loader PRs without implementing provider ingestion or PostgreSQL behavior.
+Atomic outcome: create the minimum production-grade Python repository skeleton and repository governance needed by later loader PRs, including the frozen Python runtime, local `.venv`, parallel push/merge quality gates, Conventional Commit enforcement, protected `main`, and gated auto-merge, without implementing provider ingestion or PostgreSQL behavior.
 
 Tasks:
 
+- pin the repository to **CPython 3.14.7** consistently in `.python-version`, `pyproject.toml`, development instructions, and GitHub Actions;
+- set `requires-python` so unsupported major/minor Python versions fail clearly rather than silently running a different interpreter;
+- provide documented setup commands that create `.venv` with Python 3.14.7, activate it, upgrade packaging tooling, and install the project plus development/test dependencies;
+- add `.venv/` to `.gitignore` and add a guard/test ensuring no `.venv` contents are tracked;
 - create `pyproject.toml` with supported Python version and minimal runtime/dev dependencies;
 - create strict package boundaries for `api`, `application`, `ingestion`, `ops`, and shared contracts/configuration;
 - create `tests/unit` and `tests/integration` roots;
 - add deterministic configuration loading with environment variables and no committed secrets;
-- add lint, type-check, unit-test, integration-test, and coverage commands;
-- add a minimal GitHub Actions quality gate suitable for later branch protection;
-- document local setup and the rule that Portfell is a downstream database consumer only.
+- define one canonical lint command, one type-check command, one unit-test command, and one integration-test command;
+- add `.github/workflows/push-quality.yml` triggered on work-order branch pushes; implement independent parallel jobs named `lint`, `type`, `unit`, and `integration`, plus a fast `policy` job and a final `push-gate` aggregator;
+- add `.github/workflows/merge-quality.yml` triggered on pull requests targeting `main`; implement independent parallel jobs named `lint`, `type`, `unit`, and `integration`, plus a fast `policy` job and a final `merge-gate` aggregator;
+- ensure neither workflow chains `lint -> type -> unit -> integration`; those four jobs must have no dependencies on one another and may start in parallel;
+- make `push-gate` fail if any push-side required job fails/cancels/skips unexpectedly;
+- make `merge-gate` fail if any merge-side required job fails/cancels/skips unexpectedly;
+- implement machine-checkable Conventional Commit validation for every commit introduced by a work-order branch/PR;
+- implement machine-checkable branch naming validation requiring the exact work-order name, e.g. `feat/pr301-eod-quote-ingestion`;
+- implement machine-checkable commit validation requiring the exact work-order name in every commit message, e.g. `feat(pr301-eod-quote-ingestion): ...`;
+- implement PR-title validation requiring the exact work-order name;
+- configure/provide the repository-settings step or documented administrator command needed to protect `main`: require pull requests, require the `merge-gate` status check, reject force pushes, reject branch deletion, and reject direct feature pushes;
+- enable repository auto-merge and document that every implementation PR is put into auto-merge only after it is review-ready; auto-merge must wait for protected-branch requirements and `merge-gate` success;
+- ensure no workflow token or GitHub Action is able to bypass the protected-main/required-check contract for normal implementation merges;
+- document local setup, CI commands, branch/commit/PR naming rules, auto-merge procedure, and the rule that Portfell is a downstream database consumer only.
 
 Acceptance:
 
-- package imports succeed from a clean environment;
+- `python --version` inside the freshly created local `.venv` reports exactly `Python 3.14.7`;
+- `.venv/` is ignored and zero `.venv` files are tracked by Git;
+- package imports succeed from a clean Python 3.14.7 environment;
 - quality commands are documented and executable;
+- on a representative branch push, `lint`, `type`, `unit`, and `integration` appear as separate parallel jobs and `push-gate` succeeds only after all required jobs succeed;
+- on a representative PR targeting `main`, `lint`, `type`, `unit`, and `integration` appear as separate parallel jobs and `merge-gate` succeeds only after all required jobs succeed;
+- a syntactically invalid Conventional Commit is rejected by policy CI;
+- a valid Conventional Commit that omits the work-order name is rejected by policy CI;
+- a branch that omits the exact work-order name is rejected by policy CI;
+- a PR title that omits the exact work-order name is rejected by policy CI;
+- `main` is visibly protected in GitHub settings and requires `merge-gate` before merge;
+- direct feature push, force push, and branch deletion against `main` are denied by repository policy after protection is enabled;
+- repository auto-merge is enabled, and a representative PR can be placed into auto-merge but does not merge while `merge-gate` is pending or failing;
+- the representative PR auto-merges only after `merge-gate` passes and all other protected-branch requirements are satisfied;
 - no EODHD fetch implementation exists yet;
 - no PostgreSQL schema is invented before PR298;
 - no Portfell application code is copied into this repository.
 
-Owned paths: initial repository scaffold only.
+Owned paths: initial repository scaffold, `.python-version`, `.gitignore`, `pyproject.toml`, development/setup documentation, repository-policy tooling, `.github/workflows/push-quality.yml`, `.github/workflows/merge-quality.yml`, and repository settings/protection documentation or automation only.
 
 ## PR298 - pr298-postgres-serving-contract
 
@@ -223,7 +300,7 @@ Branch: `feat/pr298-postgres-serving-contract`
 
 Required commit scope: `feat(pr298-postgres-serving-contract): ...`
 
-Depends on: PR297 merged.
+Depends on: PR297 merged and its protected-main/quality-gate acceptance is verified.
 
 Atomic outcome: freeze the database serving contract before ingestion code is allowed to depend on it.
 
@@ -242,7 +319,8 @@ Acceptance:
 - DDL is deterministic and reproducible on an empty PostgreSQL database;
 - `portfell_app` can select from `portfell_market` and cannot insert/update/delete/DDL;
 - `portfell_app` cannot access `portfell_loader_sync`;
-- all timestamp assertions resolve to exactly `TIMESTAMPTZ(6)` with UTC session semantics.
+- all timestamp assertions resolve to exactly `TIMESTAMPTZ(6)` with UTC session semantics;
+- the PR reaches `main` only through the required green `merge-gate` and auto-merge path.
 
 ## PR299 - pr299-medallion-dataset-contracts
 
@@ -268,7 +346,8 @@ Acceptance:
 
 - fixture datasets round-trip through Bronze -> Silver -> Gold contracts deterministically;
 - Gold schemas are contract-compatible with PR298;
-- changing only fetch/run metadata does not change semantic row identity.
+- changing only fetch/run metadata does not change semantic row identity;
+- the PR reaches `main` only through the required green `merge-gate` and auto-merge path.
 
 ## PR300 - pr300-xetra-listing-ingestion
 
@@ -294,7 +373,8 @@ Acceptance:
 
 - fixture input containing equities, ETFs, funds, certificates, and duplicate ISINs retains every non-empty-ISIN XETRA identity;
 - empty/null ISIN rows are excluded deterministically;
-- repeated same response produces byte/semantic-equivalent normalized output apart from permitted run metadata.
+- repeated same response produces byte/semantic-equivalent normalized output apart from permitted run metadata;
+- the PR reaches `main` only through the required green `merge-gate` and auto-merge path.
 
 ## PR301 - pr301-eod-quote-ingestion
 
@@ -322,7 +402,8 @@ Acceptance:
 - same source payload repeated creates no semantic changes;
 - a corrected OHLCV row inside the overlap replaces the previous semantic row;
 - a new business date appends exactly one business-key row;
-- timestamp tests enforce timezone-aware UTC values.
+- timestamp tests enforce timezone-aware UTC values;
+- the PR reaches `main` only through the required green `merge-gate` and auto-merge path.
 
 ## PR302 - pr302-corporate-action-ingestion
 
@@ -348,7 +429,8 @@ Acceptance:
 - repeated identical source events preserve the same `event_key`;
 - corrections update the semantic event rather than creating run-dependent duplicates;
 - retractions are represented explicitly for downstream reconciliation;
-- event identity contains no run timestamps or database IDs.
+- event identity contains no run timestamps or database IDs;
+- the PR reaches `main` only through the required green `merge-gate` and auto-merge path.
 
 ## PR303 - pr303-gold-serving-build
 
@@ -373,7 +455,8 @@ Acceptance:
 - Gold fixture outputs load into PR298 DDL without transformation ambiguity;
 - duplicate primary/business keys fail the build;
 - referentially invalid market rows fail the build;
-- validation artifacts are deterministic for the same semantic input.
+- validation artifacts are deterministic for the same semantic input;
+- the PR reaches `main` only through the required green `merge-gate` and auto-merge path.
 
 ## PR304 - pr304-postgres-idempotent-sync
 
@@ -400,7 +483,8 @@ Acceptance:
 - immediate replay of identical Gold produces zero semantic data mutations;
 - one corrected row produces exactly one semantic update;
 - one retraction removes/deactivates exactly the intended semantic event according to the frozen contract;
-- injected failure before commit leaves both serving data and sync state unchanged.
+- injected failure before commit leaves both serving data and sync state unchanged;
+- the PR reaches `main` only through the required green `merge-gate` and auto-merge path.
 
 ## PR305 - pr305-sunday-1100-loader-runner
 
@@ -426,7 +510,8 @@ Acceptance:
 - one command executes the full weekly pipeline;
 - a second concurrent invocation cannot run the same scheduled job;
 - a failed stage prevents downstream publication;
-- the committed scheduler expression is exactly the frozen expression.
+- the committed scheduler expression is exactly the frozen expression;
+- the PR reaches `main` only through the required green `merge-gate` and auto-merge path.
 
 ## PR306 - pr306-destructive-bootstrap-command
 
@@ -452,7 +537,8 @@ Acceptance:
 - command without confirmation performs zero destructive actions;
 - dry run names the exact destruction scope;
 - confirmed fixture/integration bootstrap starts from empty loader-owned state and reaches a verified serving state;
-- unrelated database objects survive unchanged.
+- unrelated database objects survive unchanged;
+- the PR reaches `main` only through the required green `merge-gate` and auto-merge path.
 
 ## PR307 - pr307-loader-end-to-end-gate
 
@@ -475,12 +561,17 @@ Tasks:
 - add a new listing and assert it enters the next cycle with associated histories;
 - verify all PostgreSQL timestamp columns are `TIMESTAMPTZ(6)` and sessions UTC;
 - verify `portfell_app` is read-only;
+- verify the repository is running on the frozen Python 3.14.7 baseline;
+- verify `main` remains protected with required `merge-gate`, direct-push/force-push/deletion restrictions, and repository auto-merge enabled;
+- verify the push and merge workflows expose parallel `lint`, `type`, `unit`, and `integration` jobs;
+- verify a representative policy fixture rejects non-Conventional Commits and work-order-name omissions;
 - emit a concise machine-readable acceptance report for the cross-repository contract gate.
 
 Acceptance:
 
 - all scenarios pass on the same commit SHA;
-- quality gate passes;
+- quality gate passes through the protected-main auto-merge path;
+- repository-policy acceptance confirms Python 3.14.7, `.venv` hygiene, Conventional Commits/work-order naming, parallel push/merge gates, protected `main`, and gated auto-merge;
 - no test imports code from the Portfell repository;
 - acceptance artifacts are sufficient for Portfell's cross-repository contract smoke test.
 
@@ -494,6 +585,13 @@ Portfell work orders remain in `SergejSchweizer/portfell/BACKLOG.md`. The Portfe
 
 The loader side is complete when all of the following are true from clean `main`:
 
+- repository runtime, local `.venv`, and CI all use CPython 3.14.7;
+- `.venv/` is ignored and never tracked;
+- all commits on implementation PRs are valid Conventional Commits and contain the exact work-order name;
+- every work-order branch and PR title contains the exact work-order name;
+- push and merge workflows run `lint`, `type`, `unit`, and `integration` in parallel and fail closed through their aggregator gates;
+- `main` is protected, requires the green `merge-gate`, rejects direct feature pushes/force pushes/deletion, and cannot be merged around the required gate;
+- repository auto-merge is enabled and implementation PRs merge to `main` only after protected-branch requirements and `merge-gate` pass;
 - all current XETRA listings with non-empty ISIN can be discovered from scratch;
 - full available EOD quote, dividend, and split history can be bootstrapped for that universe;
 - Gold passes frozen keys/types/referential validation;
