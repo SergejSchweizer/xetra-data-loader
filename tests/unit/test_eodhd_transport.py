@@ -14,7 +14,7 @@ class FakeResponse:
     def read(self) -> bytes:
         return self.payload
 
-    def __enter__(self) -> "FakeResponse":
+    def __enter__(self) -> FakeResponse:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
