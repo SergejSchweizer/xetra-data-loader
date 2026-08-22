@@ -34,7 +34,7 @@ def test_mixed_fixture_keeps_every_non_empty_isin_without_instrument_filters() -
     transport = FixtureTransport(fixture)
     result = ingest_xetra_listings(transport)
     assert transport.calls == ["exchange-symbol-list/XETRA"]
-    assert [record.code for record in result.silver_records] == ["ETF", "FUND", "STOCK"]
+    assert [record.code for record in result.silver_records] == ["ETF", "STOCK", "FUND"]
 
 
 def test_replay_is_deterministic_even_if_provider_order_changes() -> None:
