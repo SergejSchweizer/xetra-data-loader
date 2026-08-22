@@ -11,6 +11,15 @@ from psycopg import Connection, Cursor
 from xetra_data_loader.gold.quotes import QuoteGoldResult
 from xetra_data_loader.sync.core import SyncCounters, SyncOutcome, run_sync
 
+QuoteSemantic = tuple[
+    Decimal | None,
+    Decimal | None,
+    Decimal | None,
+    Decimal,
+    Decimal | None,
+    int | None,
+]
+
 
 def sync_quotes(
     connection: Connection[Any],
@@ -34,12 +43,8 @@ def sync_quotes(
                 "WHERE isin = %s AND exchange = %s AND code = %s AND trade_date = %s",
                 row.key,
             )
-            existing = cast(
-                tuple[Decimal | None, Decimal | None, Decimal | None, Decimal, Decimal | None, int | None]
-                | None,
-                cursor.fetchone(),
-            )
-            semantic = (
+            existing = cast(QuoteSemantic | None, cursor.fetchone())
+            semantic: QuoteSemantic = (
                 row.open,
                 row.high,
                 row.low,
@@ -89,5 +94,6 @@ def sync_quotes(
 
 
 def _require_utc(value: datetime) -> None:
-    if value.tzinfo is None or value.utcoffset() is None or value.utcoffset() != UTC.utcoffset(value):
+    offset = value.utcoffset()
+    if value.tzinfo is None or offset is None or offset != UTC.utcoffset(value):
         raise ValueError("published_at_utc must be timezone-aware UTC")
