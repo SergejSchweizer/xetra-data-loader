@@ -17,6 +17,10 @@ python -c "import xetra_data_loader; print(xetra_data_loader.__version__)"
 
 The repository-local `.venv/` is intentionally ignored and must never be committed.
 
+## Local secrets
+
+Copy `config.example.yaml` to `config.yaml` and fill in the EODHD token and PostgreSQL credentials. The loader reads this file for bootstrap and database connections; `config.yaml` is ignored by Git and must remain local. Environment variables (`EODHD_API_TOKEN`, `XDL_POSTGRES_DSN`, and `XDL_MEDALLION_ROOT`) still override the corresponding file values.
+
 ## Current scope
 
-The initial repository baseline contains no provider, database, or business implementation. Those capabilities are introduced by the dependency-ordered work orders in `BACKLOG.md`.
+The dependency-ordered work orders in `BACKLOG.md` provide the EODHD transport, XETRA listing and corporate-action ingestion, Bronze/Silver/Gold datasets, transactional PostgreSQL publication, weekly orchestration, guarded bootstrap, and acceptance verification. The real-target acceptance run remains an operational deployment step and requires valid access to the configured PostgreSQL instance.

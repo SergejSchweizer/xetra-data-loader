@@ -15,6 +15,7 @@ from urllib.request import Request, urlopen
 
 from psycopg import Connection
 
+from xetra_data_loader.config import resolve_eodhd_token, resolve_medallion_root
 from xetra_data_loader.contracts.corporate_actions import DividendEvent, SplitEvent
 from xetra_data_loader.contracts.listings import ListingRecord
 from xetra_data_loader.contracts.quotes import QuoteRecord
@@ -297,7 +298,10 @@ class _AttemptCounter:
 class _MeasuredTransport:
     def __init__(self, token: str | None = None) -> None:
         self._opener = _AttemptCounter()
-        self._transport = EodhdTransport(token=token, opener=self._opener.open)
+        self._transport = EodhdTransport(
+            token=resolve_eodhd_token(token),
+            opener=self._opener.open,
+        )
         self.logical_requests = 0
 
     @property
@@ -341,9 +345,7 @@ class PostgresEodhdBootstrapRuntime:
 
     @classmethod
     def from_environment(cls) -> PostgresEodhdBootstrapRuntime:
-        root = os.getenv("XDL_MEDALLION_ROOT")
-        if root is None or not root.strip():
-            raise ValueError("XDL_MEDALLION_ROOT is required")
+        root = resolve_medallion_root()
         return cls(
             connection=connect_postgres(),
             transport=_MeasuredTransport(),

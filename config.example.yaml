@@ -1,0 +1,16 @@
+# Copy this file to config.yaml and replace the placeholders locally.
+# config.yaml is ignored by Git and must never be committed.
+
+eodhd:
+  api_token: "replace-with-eodhd-api-token"
+
+postgres:
+  host: "10.10.1.3"
+  port: 54321
+  user: "dbadmin"
+  password: "replace-with-postgres-password"
+  # Optional: omit to use PostgreSQL's default database for the user.
+  # database: ""
+
+medallion:
+  root: ".data/medallion"

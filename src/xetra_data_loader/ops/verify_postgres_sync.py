@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import socket
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -16,6 +15,7 @@ from typing import Any, cast
 
 from psycopg import Connection, Cursor, Error
 
+from xetra_data_loader.config import resolve_medallion_root
 from xetra_data_loader.medallion.core import JSONValue, Layer, MedallionLayout, canonical_json
 from xetra_data_loader.ops.bootstrap import (
     BootstrapResult,
@@ -750,9 +750,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 2
 
-    medallion_root_value = os.getenv("XDL_MEDALLION_ROOT")
-    if medallion_root_value is None or not medallion_root_value.strip():
-        raise ValueError("XDL_MEDALLION_ROOT is required")
+    medallion_root_value = resolve_medallion_root()
     report = execute_production_full_sync_and_verify(
         medallion_root=Path(medallion_root_value),
         output_path=args.output,

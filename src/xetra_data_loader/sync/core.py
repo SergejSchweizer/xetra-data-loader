@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -13,6 +12,8 @@ from uuid import uuid4
 
 import psycopg
 from psycopg import Connection, Cursor
+
+from xetra_data_loader.config import resolve_postgres_dsn
 
 type JSONValue = str | int | float | bool | None | list[JSONValue] | dict[str, JSONValue]
 type SemanticRow = Mapping[str, JSONValue]
@@ -54,11 +55,9 @@ class SyncOutcome:
 
 
 def connect_postgres(dsn: str | None = None) -> Connection[Any]:
-    """Connect using an explicit DSN or the secret-only environment variable."""
+    """Connect using an explicit DSN, config.yaml, or the secret-only environment variable."""
 
-    resolved = dsn if dsn is not None else os.getenv("XDL_POSTGRES_DSN")
-    if resolved is None or not resolved.strip():
-        raise ValueError("XDL_POSTGRES_DSN is required")
+    resolved = resolve_postgres_dsn(dsn)
     return psycopg.connect(resolved, autocommit=False)
 
 

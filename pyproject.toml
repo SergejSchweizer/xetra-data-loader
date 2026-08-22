@@ -12,11 +12,13 @@ authors = [{ name = "Sergej Schweizer" }]
 license = { text = "Proprietary" }
 dependencies = [
   "psycopg[binary]>=3.2",
+  "PyYAML>=6.0",
 ]
 
 [project.scripts]
 xdl-weekly = "xetra_data_loader.pipeline.orchestrator:main"
 xdl-bootstrap = "xetra_data_loader.ops.bootstrap:main"
+xdl-verify-production-sync = "xetra_data_loader.ops.verify_postgres_sync:main"
 
 [project.optional-dependencies]
 dev = [
@@ -24,6 +26,7 @@ dev = [
   "pytest>=8.4",
   "pytest-cov>=6.2",
   "ruff>=0.12",
+  "types-PyYAML>=6.0.12",
 ]
 
 [tool.hatch.build.targets.wheel]
