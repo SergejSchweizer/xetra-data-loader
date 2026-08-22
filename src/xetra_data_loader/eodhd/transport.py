@@ -12,7 +12,6 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
-
 type JSONValue = str | int | float | bool | None | list[JSONValue] | dict[str, JSONValue]
 
 
@@ -45,7 +44,8 @@ class RetryPolicy:
             raise ValueError("retry delays must be non-negative")
 
     def delay(self, attempt: int) -> float:
-        return min(self.base_delay_seconds * (2 ** max(0, attempt - 1)), self.max_delay_seconds)
+        delay = self.base_delay_seconds * (2 ** max(0, attempt - 1))
+        return float(min(delay, self.max_delay_seconds))
 
 
 class EodhdTransport:
@@ -73,7 +73,11 @@ class EodhdTransport:
         self._opener = opener or _default_open
         self._sleeper = sleeper
 
-    def get_json(self, path: str, params: Mapping[str, str | int | float] | None = None) -> JSONValue:
+    def get_json(
+        self,
+        path: str,
+        params: Mapping[str, str | int | float] | None = None,
+    ) -> JSONValue:
         """GET and decode one JSON response, retrying only transient failures."""
 
         normalized_path = path.strip("/")
@@ -83,7 +87,10 @@ class EodhdTransport:
         query["api_token"] = self._token
         query.setdefault("fmt", "json")
         url = f"{self._base_url}/{normalized_path}?{urlencode(query)}"
-        request = Request(url, headers={"Accept": "application/json", "User-Agent": "xetra-data-loader"})
+        request = Request(
+            url,
+            headers={"Accept": "application/json", "User-Agent": "xetra-data-loader"},
+        )
 
         for attempt in range(1, self._retry_policy.max_attempts + 1):
             try:
@@ -119,7 +126,9 @@ def scrub_url(url: str) -> str:
             safe_pairs.append(f"{key}=***")
         else:
             safe_pairs.append(pair)
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, "&".join(safe_pairs), parts.fragment))
+    return urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, "&".join(safe_pairs), parts.fragment)
+    )
 
 
 def _default_open(request: Request, timeout: float) -> BinaryResponse:
