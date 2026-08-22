@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -12,7 +13,13 @@ from xetra_data_loader.gold.dividends import build_dividend_gold
 from xetra_data_loader.gold.listings import build_listing_gold
 from xetra_data_loader.gold.quotes import build_quote_gold
 from xetra_data_loader.gold.splits import build_split_gold
-from xetra_data_loader.medallion.core import Layer, Manifest, MedallionLayout, canonical_json
+from xetra_data_loader.medallion.core import (
+    JSONValue,
+    Layer,
+    Manifest,
+    MedallionLayout,
+    canonical_json,
+)
 from xetra_data_loader.ops.verify_postgres_sync import (
     DATASETS,
     DatasetVerification,
@@ -27,7 +34,7 @@ from xetra_data_loader.ops.verify_postgres_sync import (
 pytestmark = pytest.mark.integration
 
 
-def _records() -> tuple[object, object, object, object]:
+def _records() -> tuple[ListingRecord, QuoteRecord, DividendEvent, SplitEvent]:
     listing = ListingRecord(
         isin="DE0000000001",
         exchange="XETRA",
@@ -71,7 +78,7 @@ def _records() -> tuple[object, object, object, object]:
 def _write_dataset(
     layout: MedallionLayout,
     dataset: str,
-    rows: list[dict[str, object]],
+    rows: list[dict[str, JSONValue]],
     fingerprint: str,
 ) -> None:
     for layer in (Layer.SILVER, Layer.GOLD):
@@ -102,18 +109,29 @@ def test_gold_snapshot_recomputes_exact_builder_fingerprints(tmp_path: Path) -> 
     quote_gold = build_quote_gold([quote])
     dividend_gold = build_dividend_gold([dividend])
     split_gold = build_split_gold([split])
-    results = {
-        "listings": listing_gold,
-        "eod_quotes": quote_gold,
-        "dividends": dividend_gold,
-        "splits": split_gold,
-    }
     layout = MedallionLayout(tmp_path)
 
-    for dataset, gold in results.items():
-        rows = [dict(row) for row in gold.semantic_rows()]
-        _write_dataset(layout, dataset, rows, gold.semantic_fingerprint)
-        assert semantic_fingerprint(dataset, rows) == gold.semantic_fingerprint
+    rows_by_dataset = {
+        "listings": (
+            [dict(row) for row in listing_gold.semantic_rows()],
+            listing_gold.semantic_fingerprint,
+        ),
+        "eod_quotes": (
+            [dict(row) for row in quote_gold.semantic_rows()],
+            quote_gold.semantic_fingerprint,
+        ),
+        "dividends": (
+            [dict(row) for row in dividend_gold.semantic_rows()],
+            dividend_gold.semantic_fingerprint,
+        ),
+        "splits": (
+            [dict(row) for row in split_gold.semantic_rows()],
+            split_gold.semantic_fingerprint,
+        ),
+    }
+    for dataset, (rows, fingerprint) in rows_by_dataset.items():
+        _write_dataset(layout, dataset, rows, fingerprint)
+        assert semantic_fingerprint(dataset, rows) == fingerprint
 
     snapshots = load_gold_snapshots(tmp_path)
     assert tuple(snapshots) == DATASETS
@@ -188,12 +206,7 @@ def test_acceptance_report_is_sanitized_and_fails_closed(tmp_path: Path) -> None
         committed_runs=passing.committed_runs,
         datasets={
             **passing.datasets,
-            "eod_quotes": DatasetVerification(
-                **{
-                    **_passing_dataset().__dict__,
-                    "missing_keys": 1,
-                }
-            ),
+            "eod_quotes": replace(_passing_dataset(), missing_keys=1),
         },
         orphan_counts=passing.orphan_counts,
         timestamps=passing.timestamps,
