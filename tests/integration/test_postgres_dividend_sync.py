@@ -3,8 +3,10 @@ import subprocess
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
+from psycopg import Connection
 
 from xetra_data_loader.contracts.corporate_actions import DividendEvent, retract_dividend
 from xetra_data_loader.gold.dividends import build_dividend_gold
@@ -38,10 +40,10 @@ def _event(value: str) -> DividendEvent:
     )
 
 
-def _dividend_count(connection: object) -> tuple[int]:
-    return connection.execute(
-        "SELECT count(*) FROM portfell_market.dividends"
-    ).fetchone()
+def _dividend_count(connection: Connection[Any]) -> tuple[int]:
+    row = connection.execute("SELECT count(*) FROM portfell_market.dividends").fetchone()
+    assert row is not None
+    return (int(row[0]),)
 
 
 def test_dividend_sync_initial_replay_correction_and_retraction() -> None:
