@@ -7,7 +7,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from typing import Protocol, cast
+from typing import Protocol
 
 from xetra_data_loader.contracts.listings import ListingRecord
 from xetra_data_loader.contracts.quotes import QuoteRecord, overlap_start, validate_unique_quotes
@@ -54,9 +54,8 @@ def ingest_quotes(
     for item in payload:
         if not isinstance(item, dict):
             raise ValueError("each EODHD quote must be a JSON object")
-        row = cast(dict[str, JSONValue], item)
-        bronze_rows.append(row)
-        silver.append(_normalize_quote(listing, row))
+        bronze_rows.append(item)
+        silver.append(_normalize_quote(listing, item))
 
     silver_records = validate_unique_quotes(silver)
     previous_by_key = {record.key: record for record in previous_records}
@@ -109,7 +108,7 @@ def _required_text(row: Mapping[str, JSONValue], key: str) -> str:
 def _decimal(value: JSONValue) -> Decimal | None:
     if value is None or value == "":
         return None
-    if isinstance(value, bool) or isinstance(value, (list, dict)):
+    if isinstance(value, (bool, list, dict)):
         raise ValueError("quote numeric field must be scalar")
     return Decimal(str(value))
 
@@ -124,7 +123,7 @@ def _required_decimal(row: Mapping[str, JSONValue], key: str) -> Decimal:
 def _integer(value: JSONValue) -> int | None:
     if value is None or value == "":
         return None
-    if isinstance(value, bool) or isinstance(value, (list, dict)):
+    if isinstance(value, (bool, list, dict)):
         raise ValueError("quote volume must be scalar")
     return int(value)
 
