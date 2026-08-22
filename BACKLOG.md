@@ -1,70 +1,69 @@
 Last reviewed: 2026-08-22
 
-# XETRA Data Loader Backlog
+# XETRA Data Loader — Atomic Parallel Backlog
 
-## 1. Status authority
+## Status authority
 
-This file is the active implementation authority for `SergejSchweizer/xetra-data-loader`.
+This file is the complete implementation authority for `SergejSchweizer/xetra-data-loader`.
 
-The previous coarse loader work orders `PR297`-`PR307` are superseded by the repository-local `XDL-PR001`-`XDL-PR032` work orders below. The old IDs remain historical traceability only and must not be implemented as written.
+The former coarse loader plan `PR297`-`PR307` is superseded. It is replaced by repository-local work orders `XDL-PR001` through `XDL-PR032`, designed for multiple weak agents that must work independently with minimal merge conflicts.
 
-Planning work order for this restructure:
+Planning gate:
 
-- Work-order name: `xdl-pr000-backlog-restructure`
-- Branch: `docs/xdl-pr000-backlog-restructure`
-- Required commit: `docs(xdl-pr000-backlog-restructure): ...`
-- Git status: planning branch exists; merge/validation pending
+- work-order: `xdl-pr000-backlog-restructure`
+- branch: `docs/xdl-pr000-backlog-restructure`
+- required commit scope: `docs(xdl-pr000-backlog-restructure): ...`
+- Git status: branch pushed; PR validation/merge pending
 
-## 2. Frozen target architecture
+No implementation work starts until XDL-PR000 is merged.
+
+## Frozen architecture
 
 ```text
 EODHD
-  |
-  v
-xetra-data-loader
-  Bronze -> Silver -> Gold
-  |
-  v
-PostgreSQL 10.10.1.3:54321
-  schemas:
-    portfell_market
-    portfell_loader_sync
-  |
-  | SELECT only through portfell_app
-  v
-portfell
+  -> xetra-data-loader
+       Bronze -> Silver -> Gold
+       -> PostgreSQL 10.10.1.3:54321
+            portfell_market
+            portfell_loader_sync
+                 |
+                 | SELECT only as portfell_app
+                 v
+              portfell
 ```
 
-`xetra-data-loader` owns provider access, XETRA discovery, market-data ingestion, medallion persistence, PostgreSQL publication, loader synchronization state, bootstrap/reset tooling, and the Sunday schedule. `portfell` is a read-only consumer and must not import this repository as a Python package.
+Frozen business/serving rules:
 
-Frozen invariants:
+- initial universe: every EODHD XETRA listing with normalized non-empty ISIN;
+- do not prefilter by ETF/UCITS/fund/type/country/currency;
+- listing identity: `(isin, exchange, code)`;
+- quote identity: `(isin, exchange, code, trade_date)`;
+- dividend/split identity: `(isin, exchange, code, event_key)`;
+- `event_key`: deterministic SHA-256 from normalized provider business fields only;
+- all PostgreSQL timestamp columns: exactly `TIMESTAMPTZ(6)`;
+- all PostgreSQL sessions: UTC;
+- `trade_date` remains `DATE`;
+- `timestamp_eod` is `trade_date 00:00:00+00:00`, not a physical exchange-close timestamp;
+- incremental refresh overlap: seven calendar days;
+- unchanged source replay must produce zero semantic PostgreSQL mutations;
+- exact scheduler: `CRON_TZ=Europe/Vienna` and `0 11 * * 0`;
+- secrets/passwords/full DSNs are never committed;
+- Portfell code, portfolio analytics, UI, users/tenants/projects, and authorization do not belong here.
 
-- initial universe = every EODHD XETRA listing with a normalized non-empty ISIN;
-- listing identity = `(isin, exchange, code)`;
-- quotes key = `(isin, exchange, code, trade_date)`;
-- dividends/splits key = `(isin, exchange, code, event_key)`;
-- `event_key` = deterministic SHA-256 over normalized provider business fields only;
-- all PostgreSQL timestamps = exactly `TIMESTAMPTZ(6)`;
-- PostgreSQL sessions = `UTC`;
-- `trade_date` remains a `DATE` and `timestamp_eod` is the canonical `00:00:00+00:00` UTC anchor, not a physical XETRA close timestamp;
-- weekly correction overlap = seven calendar days;
-- unchanged source state = zero semantic PostgreSQL mutations;
-- production endpoint `10.10.1.3:54321` is supplied by configuration, never by committed password/DSN;
-- scheduler = exactly `CRON_TZ=Europe/Vienna` and `0 11 * * 0`;
-- no portfolio analytics, Portfell UI, user/project runtime, or tenant logic belongs here.
+## Git / branch / CI rules for every agent
 
-## 3. Mandatory Git / CI contract
+Every work order is self-contained. An agent may read its dependencies but must edit only its owned paths.
 
-All implementation work orders must obey all of these rules:
+Mandatory rules:
 
-1. Base every branch on the exact merged dependency SHA documented by the work order.
-2. Before editing, record `git status --short --branch`.
-3. The exact work-order name must appear literally in:
-   - branch name;
-   - every commit message on the branch;
-   - PR title.
-4. Every commit must use Conventional Commits.
-5. Example:
+1. Start from the exact merged dependency SHA.
+2. Run and record `git status --short --branch` before edits.
+3. If any dependency is unmerged, stop; do not invent a workaround.
+4. Never branch from a sibling work-order branch.
+5. Parallel siblings start from the same predecessor merge SHA.
+6. The exact work-order name must appear literally in the branch name, every commit message, and PR title.
+7. Every commit uses Conventional Commits.
+8. Example:
 
 ```text
 Work-order: xdl-pr015-eod-quote-ingestion
@@ -73,855 +72,458 @@ Commit:     feat(xdl-pr015-eod-quote-ingestion): add deterministic quote ingesti
 PR title:   feat(xdl-pr015-eod-quote-ingestion): add deterministic quote ingestion
 ```
 
-6. Weak agents must not broaden scope, edit sibling-owned files, add compatibility shims, or branch from sibling branches.
-7. Parallel siblings always start from the same predecessor merge SHA.
-8. If a dependency is not merged, the work order remains blocked.
-9. Each PR must run focused tests plus the repository push/merge quality gates on the same head SHA.
-10. `main` may merge only through the protected-branch merge gate; auto-merge may complete only after every required check is green.
+9. Do not edit sibling-owned files, add compatibility shims, broaden scope, or perform opportunistic refactors.
+10. Run focused tests and all available repository quality gates on the same head SHA.
+11. After XDL-PR006, `main` is protected and merge occurs only through required `merge-gate`; review-ready implementation PRs use auto-merge.
 
-Repository engineering baseline:
+Python/quality baseline:
 
-- CPython `3.14.7` is the frozen stable runtime for this backlog revision;
-- repository-local `.venv` is created from Python `3.14.7` and is never committed;
-- `.python-version`, `pyproject.toml`, documentation, local setup, and CI use the same Python version;
-- push and merge workflows run `lint`, `type`, `unit`, and `integration` as four independent parallel jobs;
-- `policy` is a separate fast job;
-- `push-gate` / `merge-gate` aggregate required outcomes;
-- `main` requires `merge-gate`, rejects direct feature pushes, force pushes, and deletion;
-- repository auto-merge is enabled after protection is established.
+- CPython `3.14.7`;
+- local repository `.venv` built with Python 3.14.7 and never tracked;
+- push and merge CI each run `lint`, `type`, `unit`, `integration` as four independent parallel jobs;
+- separate fast `policy` job validates Conventional Commits and work-order naming;
+- final `push-gate` / `merge-gate` aggregate all required checks.
 
-## 4. Dependency graph optimized for weak parallel agents
+## Optimized dependency graph
 
 ```text
-XDL-PR000 planning gate
-        |
-      PR001
-        |
-   +----+----+
-   |         |
- PR002     PR003
-   |         |
-   +----+----+
-        |
-   PR004 || PR005
-        |
-      PR006
-        |
-   +----+----------------------+------------------+
-   |                           |                  |
- PR007                       PR009              PR013
-   |                           |                  |
- PR008                PR010 || PR011 || PR012     |
-   |                    |       |       |         |
-   |                  PR014   PR015   PR016 || PR017
-   |                    |       |       |       |
-   |                  PR018   PR019   PR020   PR021
-   |                    |       |       |       |
-   +--------------------+-------+-------+-------+
-                        |
-                      PR022
-                        |
-              PR023 || PR024 || PR025 || PR026
-                        |
-              +---------+---------+
-              |                   |
-            PR027               PR030
-              |                   |
-        PR028 || PR029             |
-              |                   |
-              +-------- PR031 -----+
-                         |
-                       PR032
+XDL-PR000
+   |
+ PR001
+   |
+ +---------+
+ |         |
+PR002    PR003
+ |         |
+ +----+----+
+      |
+ PR004 || PR005
+      |
+    PR006
+      |
+ +----+----------------------+--------------------+
+ |                           |                    |
+PR007                      PR009                PR013
+ |                           |                    |
+PR008               PR010 || PR011 || PR012      |
+ |                    |       |       |           |
+ +------ PR022        |       |       |           |
+ |          |         |       |       |           |
+ |        PR030     PR014   PR015   PR016 || PR017
+ |                    |       |       |       |
+ |                  PR018   PR019   PR020   PR021
+ |                    |       |       |       |
+ |                    +--+----+-------+-------+
+ |                       |    |       |       |
+ +--------------------> PR023 PR024  PR025   PR026
+                          \     |      |      /
+                           +----+------+-----+
+                                |
+                              PR027
+                                |
+                         PR028 || PR029
+                                |
+                       PR031 <- PR030
+                                |
+                              PR032
 ```
 
-Maximum safe parallel waves:
+Interpretation: `PR022` starts as soon as the database roles and medallion core exist; it does **not** wait for entity ingestion or Gold builders. Each entity can then progress independently from contract -> ingestion -> Gold -> PostgreSQL sync.
 
-- Wave A after `XDL-PR001`: `XDL-PR002` + `XDL-PR003`.
-- Wave B after `XDL-PR003` and `XDL-PR002`: `XDL-PR004` + `XDL-PR005`.
-- Wave C after governance `XDL-PR006`: `XDL-PR007` + `XDL-PR009` + `XDL-PR013`.
-- Wave D: `XDL-PR010` + `XDL-PR011` + `XDL-PR012`; `XDL-PR008` can run at the same time.
-- Wave E: `XDL-PR014` + `XDL-PR015` + `XDL-PR016` + `XDL-PR017`.
-- Wave F: `XDL-PR018` + `XDL-PR019` + `XDL-PR020` + `XDL-PR021`.
-- Wave G after sync core: `XDL-PR023` + `XDL-PR024` + `XDL-PR025` + `XDL-PR026`; `XDL-PR030` may run in parallel once its dependencies are green.
-- Wave H after pipeline orchestration: `XDL-PR028` + `XDL-PR029`.
+Safe parallel waves:
 
-## 5. Active work-order index
+- Wave 1: PR002 + PR003.
+- Wave 2: PR004 + PR005.
+- Wave 3 after governance: PR007 + PR009 + PR013.
+- Wave 4: PR008 + PR010 + PR011 + PR012.
+- Wave 5: PR014 + PR015 + PR016 + PR017; PR022 starts independently once PR008+PR009 are green.
+- Wave 6: PR018 + PR019 + PR020 + PR021; PR030 can start after PR022.
+- Wave 7: PR023 + PR024 + PR025 + PR026, each as soon as its own Gold builder plus PR022 are merged.
+- Wave 8: PR028 + PR029 after PR027.
 
-| ID | Work-order name | Branch | Depends on | Atomic result | Git status |
+## Work-order index
+
+| ID | Work-order | Branch | Depends on | Atomic result | Git status |
 | --- | --- | --- | --- | --- | --- |
-| XDL-PR001 | `xdl-pr001-python-repository-baseline` | `chore/xdl-pr001-python-repository-baseline` | XDL-PR000 | Python 3.14.7 + `.venv` + minimal package/test skeleton | not started; branch absent; blocked |
-| XDL-PR002 | `xdl-pr002-quality-command-contract` | `chore/xdl-pr002-quality-command-contract` | PR001 | canonical lint/type/unit/integration commands | not started; branch absent; blocked |
-| XDL-PR003 | `xdl-pr003-git-policy-validator` | `test/xdl-pr003-git-policy-validator` | PR001 | machine-checkable branch/commit/PR naming policy | not started; branch absent; blocked |
-| XDL-PR004 | `xdl-pr004-push-quality-workflow` | `ci/xdl-pr004-push-quality-workflow` | PR002 + PR003 | parallel push quality gate | not started; branch absent; blocked |
-| XDL-PR005 | `xdl-pr005-merge-quality-workflow` | `ci/xdl-pr005-merge-quality-workflow` | PR002 + PR003 | parallel PR merge gate | not started; branch absent; blocked |
-| XDL-PR006 | `xdl-pr006-main-protection-automerge` | `chore/xdl-pr006-main-protection-automerge` | PR004 + PR005 | protected `main` + required `merge-gate` + auto-merge | not started; branch absent; blocked |
-| XDL-PR007 | `xdl-pr007-postgres-market-schema` | `feat/xdl-pr007-postgres-market-schema` | PR006 | four consumer tables, keys, UTC timestamp contract | not started; branch absent; blocked |
-| XDL-PR008 | `xdl-pr008-postgres-role-grants` | `feat/xdl-pr008-postgres-role-grants` | PR007 | writer/read-only DB roles and grant tests | not started; branch absent; blocked |
-| XDL-PR009 | `xdl-pr009-medallion-core-contract` | `feat/xdl-pr009-medallion-core-contract` | PR006 | common Bronze/Silver/Gold layout + manifests | not started; branch absent; blocked |
-| XDL-PR010 | `xdl-pr010-listing-dataset-contract` | `feat/xdl-pr010-listing-dataset-contract` | PR009 | deterministic listing schemas/keys | not started; branch absent; blocked |
-| XDL-PR011 | `xdl-pr011-quote-dataset-contract` | `feat/xdl-pr011-quote-dataset-contract` | PR009 | deterministic quote schemas/keys | not started; branch absent; blocked |
-| XDL-PR012 | `xdl-pr012-corporate-action-contract` | `feat/xdl-pr012-corporate-action-contract` | PR009 | dividend/split schemas + event-key contract | not started; branch absent; blocked |
-| XDL-PR013 | `xdl-pr013-eodhd-transport` | `feat/xdl-pr013-eodhd-transport` | PR006 | shared EODHD HTTP/retry/rate-limit seam | not started; branch absent; blocked |
-| XDL-PR014 | `xdl-pr014-xetra-listing-ingestion` | `feat/xdl-pr014-xetra-listing-ingestion` | PR010 + PR013 | complete non-empty-ISIN XETRA discovery | not started; branch absent; blocked |
-| XDL-PR015 | `xdl-pr015-eod-quote-ingestion` | `feat/xdl-pr015-eod-quote-ingestion` | PR011 + PR013 | full + 7-day overlap quote ingestion | not started; branch absent; blocked |
-| XDL-PR016 | `xdl-pr016-dividend-ingestion` | `feat/xdl-pr016-dividend-ingestion` | PR012 + PR013 | deterministic dividend ingestion | not started; branch absent; blocked |
-| XDL-PR017 | `xdl-pr017-split-ingestion` | `feat/xdl-pr017-split-ingestion` | PR012 + PR013 | deterministic split ingestion | not started; branch absent; blocked |
-| XDL-PR018 | `xdl-pr018-gold-listing-build` | `feat/xdl-pr018-gold-listing-build` | PR007 + PR014 | validated listing Gold | not started; branch absent; blocked |
-| XDL-PR019 | `xdl-pr019-gold-quote-build` | `feat/xdl-pr019-gold-quote-build` | PR007 + PR015 | validated quote Gold | not started; branch absent; blocked |
-| XDL-PR020 | `xdl-pr020-gold-dividend-build` | `feat/xdl-pr020-gold-dividend-build` | PR007 + PR016 | validated dividend Gold | not started; branch absent; blocked |
-| XDL-PR021 | `xdl-pr021-gold-split-build` | `feat/xdl-pr021-gold-split-build` | PR007 + PR017 | validated split Gold | not started; branch absent; blocked |
-| XDL-PR022 | `xdl-pr022-postgres-sync-core` | `feat/xdl-pr022-postgres-sync-core` | PR008 + PR009 + PR018-PR021 | transactional sync state/fingerprint core | not started; branch absent; blocked |
-| XDL-PR023 | `xdl-pr023-postgres-listing-sync` | `feat/xdl-pr023-postgres-listing-sync` | PR018 + PR022 | idempotent listing publication | not started; branch absent; blocked |
-| XDL-PR024 | `xdl-pr024-postgres-quote-sync` | `feat/xdl-pr024-postgres-quote-sync` | PR019 + PR022 | idempotent quote publication | not started; branch absent; blocked |
-| XDL-PR025 | `xdl-pr025-postgres-dividend-sync` | `feat/xdl-pr025-postgres-dividend-sync` | PR020 + PR022 | idempotent dividend publication | not started; branch absent; blocked |
-| XDL-PR026 | `xdl-pr026-postgres-split-sync` | `feat/xdl-pr026-postgres-split-sync` | PR021 + PR022 | idempotent split publication | not started; branch absent; blocked |
-| XDL-PR027 | `xdl-pr027-weekly-pipeline-orchestrator` | `feat/xdl-pr027-weekly-pipeline-orchestrator` | PR023-PR026 | one deterministic weekly pipeline command | not started; branch absent; blocked |
-| XDL-PR028 | `xdl-pr028-loader-lock-restart` | `feat/xdl-pr028-loader-lock-restart` | PR027 | non-overlap lock + restart-safe execution wrapper | not started; branch absent; blocked |
-| XDL-PR029 | `xdl-pr029-sunday-1100-schedule` | `feat/xdl-pr029-sunday-1100-schedule` | PR027 | exact Vienna Sunday 11:00 scheduler | not started; branch absent; blocked |
-| XDL-PR030 | `xdl-pr030-destructive-reset-guard` | `feat/xdl-pr030-destructive-reset-guard` | PR009 + PR022 | safe scoped destructive reset primitive | not started; branch absent; blocked |
-| XDL-PR031 | `xdl-pr031-full-xetra-bootstrap` | `feat/xdl-pr031-full-xetra-bootstrap` | PR027 + PR030 | confirmed clean full-history bootstrap | not started; branch absent; blocked |
-| XDL-PR032 | `xdl-pr032-loader-e2e-gate` | `test/xdl-pr032-loader-e2e-gate` | PR028 + PR029 + PR031 | production-like acceptance gate + handoff artifact | not started; branch absent; blocked |
+| PR001 | `xdl-pr001-python-repository-baseline` | `chore/xdl-pr001-python-repository-baseline` | PR000 | Python/.venv/minimal package skeleton | not started; branch absent; blocked |
+| PR002 | `xdl-pr002-quality-command-contract` | `chore/xdl-pr002-quality-command-contract` | PR001 | canonical four local quality commands | not started; branch absent; blocked |
+| PR003 | `xdl-pr003-git-policy-validator` | `test/xdl-pr003-git-policy-validator` | PR001 | machine-enforced commit/branch/PR naming policy | not started; branch absent; blocked |
+| PR004 | `xdl-pr004-push-quality-workflow` | `ci/xdl-pr004-push-quality-workflow` | PR002+PR003 | parallel push gate | not started; branch absent; blocked |
+| PR005 | `xdl-pr005-merge-quality-workflow` | `ci/xdl-pr005-merge-quality-workflow` | PR002+PR003 | parallel merge gate | not started; branch absent; blocked |
+| PR006 | `xdl-pr006-main-protection-automerge` | `chore/xdl-pr006-main-protection-automerge` | PR004+PR005 | protected main + required gate + auto-merge | not started; branch absent; blocked |
+| PR007 | `xdl-pr007-postgres-market-schema` | `feat/xdl-pr007-postgres-market-schema` | PR006 | frozen market DDL/DTO/timestamp contract | not started; branch absent; blocked |
+| PR008 | `xdl-pr008-postgres-role-grants` | `feat/xdl-pr008-postgres-role-grants` | PR007 | writer/read-only grants | not started; branch absent; blocked |
+| PR009 | `xdl-pr009-medallion-core-contract` | `feat/xdl-pr009-medallion-core-contract` | PR006 | layer/layout/manifest primitives | not started; branch absent; blocked |
+| PR010 | `xdl-pr010-listing-dataset-contract` | `feat/xdl-pr010-listing-dataset-contract` | PR009 | listing dataset contract | not started; branch absent; blocked |
+| PR011 | `xdl-pr011-quote-dataset-contract` | `feat/xdl-pr011-quote-dataset-contract` | PR009 | quote dataset contract | not started; branch absent; blocked |
+| PR012 | `xdl-pr012-corporate-action-contract` | `feat/xdl-pr012-corporate-action-contract` | PR009 | dividend/split event contract | not started; branch absent; blocked |
+| PR013 | `xdl-pr013-eodhd-transport` | `feat/xdl-pr013-eodhd-transport` | PR006 | provider HTTP/retry/rate-limit seam | not started; branch absent; blocked |
+| PR014 | `xdl-pr014-xetra-listing-ingestion` | `feat/xdl-pr014-xetra-listing-ingestion` | PR010+PR013 | all non-empty-ISIN XETRA listings | not started; branch absent; blocked |
+| PR015 | `xdl-pr015-eod-quote-ingestion` | `feat/xdl-pr015-eod-quote-ingestion` | PR011+PR013 | full/overlap quote ingestion | not started; branch absent; blocked |
+| PR016 | `xdl-pr016-dividend-ingestion` | `feat/xdl-pr016-dividend-ingestion` | PR012+PR013 | full/overlap dividend ingestion | not started; branch absent; blocked |
+| PR017 | `xdl-pr017-split-ingestion` | `feat/xdl-pr017-split-ingestion` | PR012+PR013 | full/overlap split ingestion | not started; branch absent; blocked |
+| PR018 | `xdl-pr018-gold-listing-build` | `feat/xdl-pr018-gold-listing-build` | PR007+PR014 | validated listing Gold | not started; branch absent; blocked |
+| PR019 | `xdl-pr019-gold-quote-build` | `feat/xdl-pr019-gold-quote-build` | PR007+PR015 | validated quote Gold | not started; branch absent; blocked |
+| PR020 | `xdl-pr020-gold-dividend-build` | `feat/xdl-pr020-gold-dividend-build` | PR007+PR016 | validated dividend Gold | not started; branch absent; blocked |
+| PR021 | `xdl-pr021-gold-split-build` | `feat/xdl-pr021-gold-split-build` | PR007+PR017 | validated split Gold | not started; branch absent; blocked |
+| PR022 | `xdl-pr022-postgres-sync-core` | `feat/xdl-pr022-postgres-sync-core` | PR008+PR009 | generic transactional sync/state/fingerprint core | not started; branch absent; blocked |
+| PR023 | `xdl-pr023-postgres-listing-sync` | `feat/xdl-pr023-postgres-listing-sync` | PR018+PR022 | idempotent listing publication | not started; branch absent; blocked |
+| PR024 | `xdl-pr024-postgres-quote-sync` | `feat/xdl-pr024-postgres-quote-sync` | PR019+PR022 | idempotent quote publication | not started; branch absent; blocked |
+| PR025 | `xdl-pr025-postgres-dividend-sync` | `feat/xdl-pr025-postgres-dividend-sync` | PR020+PR022 | idempotent dividend publication | not started; branch absent; blocked |
+| PR026 | `xdl-pr026-postgres-split-sync` | `feat/xdl-pr026-postgres-split-sync` | PR021+PR022 | idempotent split publication | not started; branch absent; blocked |
+| PR027 | `xdl-pr027-weekly-pipeline-orchestrator` | `feat/xdl-pr027-weekly-pipeline-orchestrator` | PR023-PR026 | single ordered weekly command | not started; branch absent; blocked |
+| PR028 | `xdl-pr028-loader-lock-restart` | `feat/xdl-pr028-loader-lock-restart` | PR027 | non-overlap/restart-safe wrapper | not started; branch absent; blocked |
+| PR029 | `xdl-pr029-sunday-1100-schedule` | `feat/xdl-pr029-sunday-1100-schedule` | PR027 | exact scheduler configuration | not started; branch absent; blocked |
+| PR030 | `xdl-pr030-destructive-reset-guard` | `feat/xdl-pr030-destructive-reset-guard` | PR009+PR022 | scoped confirmed reset primitive | not started; branch absent; blocked |
+| PR031 | `xdl-pr031-full-xetra-bootstrap` | `feat/xdl-pr031-full-xetra-bootstrap` | PR027+PR030 | clean full-history bootstrap | not started; branch absent; blocked |
+| PR032 | `xdl-pr032-loader-e2e-gate` | `test/xdl-pr032-loader-e2e-gate` | PR028+PR029+PR031 | final production-like acceptance gate | not started; branch absent; blocked |
 
-## 6. Exact work orders
+## Exact atomic PR specifications
 
-### XDL-PR001 — xdl-pr001-python-repository-baseline
+### PR001 — xdl-pr001-python-repository-baseline
 
-Branch: `chore/xdl-pr001-python-repository-baseline`
+Branch `chore/xdl-pr001-python-repository-baseline`; commit scope `chore(xdl-pr001-python-repository-baseline): ...`; depends on PR000.
 
-Commit scope: `chore(xdl-pr001-python-repository-baseline): ...`
+Owned paths: `.python-version`, `.gitignore`, `pyproject.toml` package/Python metadata only, `src/xetra_data_loader/__init__.py`, empty package directories, test-root placeholders, README local-setup section.
 
-Depends on: XDL-PR000 merged.
+Tasks: pin Python 3.14.7; set compatible `requires-python`; create installable src-layout package; create `tests/unit` and `tests/integration`; document `python3.14 -m venv .venv`, activation and installation; ignore `.venv/`; add no provider/database/business code.
 
-Owned paths: `.python-version`, `.gitignore`, `pyproject.toml` Python/package metadata only, `src/xetra_data_loader/__init__.py`, package directory placeholders, `tests/unit/__init__.py`, `tests/integration/__init__.py`, `README.md` setup section.
+Acceptance: new `.venv` reports exactly Python 3.14.7; package installs and imports; zero `.venv` files are tracked; package/test roots exist; no EODHD/PostgreSQL/medallion implementation exists.
 
-Tasks:
+### PR002 — xdl-pr002-quality-command-contract
 
-- pin CPython `3.14.7` in `.python-version` and package metadata;
-- define `requires-python` compatible with the exact 3.14 baseline;
-- create minimal installable `src/xetra_data_loader` package and test roots;
-- document creation/activation of repository-local `.venv` with Python 3.14.7;
-- ignore `.venv/`; do not commit virtual-environment contents;
-- add only dependencies needed for an empty package/test bootstrap.
+Branch `chore/xdl-pr002-quality-command-contract`; commit scope `chore(xdl-pr002-quality-command-contract): ...`; depends on PR001.
 
-Acceptance:
+Owned paths: quality-tool sections of `pyproject.toml`, `scripts/quality/*` or one task runner, command-specific smoke fixtures.
 
-- fresh `.venv` reports `Python 3.14.7`;
-- editable/package install succeeds;
-- `import xetra_data_loader` succeeds;
-- `git ls-files .venv` returns no tracked files;
-- no EODHD, PostgreSQL, medallion, or business logic exists.
+Tasks: configure one lint command, one static-type command, one unit-test command restricted to `tests/unit`, one integration-test command restricted to `tests/integration`; make each non-interactive and non-zero on failure; document exact invocations; add no workflow YAML.
 
-### XDL-PR002 — xdl-pr002-quality-command-contract
+Acceptance: all four commands run independently; unit never collects integration tests; integration never collects unit tests; no CI workflow file changed.
 
-Branch: `chore/xdl-pr002-quality-command-contract`
+### PR003 — xdl-pr003-git-policy-validator
 
-Commit scope: `chore(xdl-pr002-quality-command-contract): ...`
+Branch `test/xdl-pr003-git-policy-validator`; commit scope `test(xdl-pr003-git-policy-validator): ...`; depends on PR001.
 
-Depends on: PR001 merged.
+Owned paths: `scripts/ci/validate_git_policy.py`, `tests/unit/test_git_policy.py`, policy fixtures only.
 
-Owned paths: quality-tool sections of `pyproject.toml`, `scripts/quality/*` or one `Makefile`/task runner, minimal smoke tests required by commands.
+Tasks: validate Conventional Commit syntax; extract exact `xdl-prNNN-*` work-order from branch; require that exact value in every introduced commit subject; require it in PR title when metadata is supplied; reject malformed branch names; remain read-only toward GitHub.
 
-Tasks:
+Acceptance: valid branch/commit/title passes; invalid Conventional Commit fails; missing work-order in branch fails; missing work-order in any commit fails; missing work-order in PR title fails; validator cannot mutate repository state.
 
-- choose/configure one lint command;
-- choose/configure one static type command;
-- define unit-test command restricted to `tests/unit`;
-- define integration-test command restricted to `tests/integration`;
-- make every command non-interactive and return non-zero on failure;
-- document exact commands without adding workflows yet.
+### PR004 — xdl-pr004-push-quality-workflow
 
-Acceptance:
+Branch `ci/xdl-pr004-push-quality-workflow`; commit scope `ci(xdl-pr004-push-quality-workflow): ...`; depends on PR002+PR003.
 
-- all four commands run independently on clean PR001;
-- unit command does not execute integration tests and vice versa;
-- no workflow YAML is changed.
+Owned path: `.github/workflows/push-quality.yml` only.
 
-### XDL-PR003 — xdl-pr003-git-policy-validator
+Tasks: trigger on non-main branch pushes; define independent jobs named `lint`, `type`, `unit`, `integration`, `policy`; use Python 3.14.7; ensure the four quality jobs have no `needs` relationship among themselves; create final `push-gate` depending on all five; fail aggregate on failed/cancelled/unexpectedly skipped required job.
 
-Branch: `test/xdl-pr003-git-policy-validator`
+Acceptance: workflow validates; representative push exposes the four quality jobs in parallel; policy runs separately; `push-gate` cannot succeed unless all required jobs succeed.
 
-Commit scope: `test(xdl-pr003-git-policy-validator): ...`
+### PR005 — xdl-pr005-merge-quality-workflow
 
-Depends on: PR001 merged.
+Branch `ci/xdl-pr005-merge-quality-workflow`; commit scope `ci(xdl-pr005-merge-quality-workflow): ...`; depends on PR002+PR003.
 
-Owned paths: `scripts/ci/validate_git_policy.py`, `tests/unit/test_git_policy.py`, policy fixture files only.
+Owned path: `.github/workflows/merge-quality.yml` only.
 
-Tasks:
+Tasks: trigger on PRs targeting main; define independent `lint`, `type`, `unit`, `integration`, `policy`; use Python 3.14.7; create final stable check named exactly `merge-gate`; do not add any merge/push bypass token.
 
-- validate Conventional Commit syntax;
-- extract exact `xdl-prNNN-*` work-order name from branch;
-- require that exact name in every introduced commit subject;
-- require that exact name in PR title when PR metadata is available;
-- reject malformed/missing work-order branch names;
-- cover valid/invalid cases with unit tests.
+Acceptance: workflow validates; four quality jobs are parallel; failed/cancelled required job prevents `merge-gate`; check is exposed exactly as `merge-gate`.
 
-Acceptance:
+### PR006 — xdl-pr006-main-protection-automerge
 
-- valid example passes;
-- invalid Conventional Commit fails;
-- commit missing work-order name fails;
-- branch missing work-order name fails;
-- PR title missing work-order name fails;
-- validator has no GitHub API write capability.
+Branch `chore/xdl-pr006-main-protection-automerge`; commit scope `chore(xdl-pr006-main-protection-automerge): ...`; depends on PR004+PR005 and observed successful workflow runs.
 
-### XDL-PR004 — xdl-pr004-push-quality-workflow
+Owned scope: GitHub repository settings and `docs/repository-governance.md` only.
 
-Branch: `ci/xdl-pr004-push-quality-workflow`
+Tasks: enable auto-merge; protect `main`; require PRs; require `merge-gate`; reject force pushes and branch deletion; prevent normal direct feature pushes; document exact weak-agent auto-merge procedure.
 
-Commit scope: `ci(xdl-pr004-push-quality-workflow): ...`
+Acceptance: GitHub reports `main` protected; direct feature push/force push/delete are denied; a PR cannot merge with pending/failing `merge-gate`; a review-ready PR placed into auto-merge completes only after required checks pass.
 
-Depends on: PR002 + PR003 merged.
+### PR007 — xdl-pr007-postgres-market-schema
 
-Owned paths: `.github/workflows/push-quality.yml` only.
+Branch `feat/xdl-pr007-postgres-market-schema`; commit scope `feat(xdl-pr007-postgres-market-schema): ...`; depends on PR006.
 
-Tasks:
+Owned paths: `sql/schema/001_portfell_market.sql`, `src/xetra_data_loader/contracts/postgres_market.py`, schema unit/integration tests only.
 
-- trigger on non-main work-order branch pushes;
-- create independent jobs `lint`, `type`, `unit`, `integration`, `policy`;
-- ensure the four code-quality jobs have no dependencies on each other;
-- create final `push-gate` job depending on all required jobs;
-- make `push-gate` fail on failed/cancelled/unexpectedly skipped required jobs;
-- use Python 3.14.7.
+Tasks: create `portfell_market`; define `listings`, `eod_quotes`, `dividends`, `splits`; enforce frozen business keys; use exact `TIMESTAMPTZ(6)` for timestamp fields; preserve `trade_date DATE`; define matching typed DTOs; reject naive datetimes.
 
-Acceptance:
+Acceptance: DDL recreates on empty PostgreSQL; introspection confirms exact timestamp types; DTO names/nullability match DDL; duplicate-key and naive-datetime cases fail.
 
-- workflow syntax validates;
-- a test push shows four code-quality jobs eligible to run in parallel;
-- `push-gate` is green only when all required jobs are green.
+### PR008 — xdl-pr008-postgres-role-grants
 
-### XDL-PR005 — xdl-pr005-merge-quality-workflow
+Branch `feat/xdl-pr008-postgres-role-grants`; commit scope `feat(xdl-pr008-postgres-role-grants): ...`; depends on PR007.
 
-Branch: `ci/xdl-pr005-merge-quality-workflow`
+Owned paths: `sql/roles/002_loader_roles.sql`, `tests/integration/test_postgres_roles.py` only.
 
-Commit scope: `ci(xdl-pr005-merge-quality-workflow): ...`
+Tasks: define `portfell_data_loader` writer grants; define `portfell_app` SELECT-only on `portfell_market`; deny app INSERT/UPDATE/DELETE/DDL; deny app access to `portfell_loader_sync`.
 
-Depends on: PR002 + PR003 merged.
+Acceptance: writer performs required DML; app selects market tables; every app mutation/DDL attempt fails; app loader-sync access fails.
 
-Owned paths: `.github/workflows/merge-quality.yml` only.
+### PR009 — xdl-pr009-medallion-core-contract
 
-Tasks:
+Branch `feat/xdl-pr009-medallion-core-contract`; commit scope `feat(xdl-pr009-medallion-core-contract): ...`; depends on PR006.
 
-- trigger on pull requests targeting `main`;
-- create independent `lint`, `type`, `unit`, `integration`, `policy` jobs;
-- create final required `merge-gate` aggregator;
-- use Python 3.14.7;
-- expose stable check name exactly `merge-gate`.
+Owned paths: `src/xetra_data_loader/medallion/core.py`, `medallion/layout.py`, corresponding unit tests.
 
-Acceptance:
+Tasks: define Bronze/Silver/Gold path rules; define manifest fields for dataset/run/source bounds/counts/fingerprints/timestamps; separate semantic from run/fetch metadata; define deterministic serialization.
 
-- workflow syntax validates;
-- four code-quality jobs can run in parallel;
-- failed policy or quality job prevents `merge-gate` success;
-- no merge or push token bypass is implemented.
+Acceptance: identical semantic fixture gives identical semantic fingerprint; changing run/fetch metadata alone leaves semantic fingerprint unchanged; invalid layer/path combination fails closed.
 
-### XDL-PR006 — xdl-pr006-main-protection-automerge
+### PR010 — xdl-pr010-listing-dataset-contract
 
-Branch: `chore/xdl-pr006-main-protection-automerge`
+Branch `feat/xdl-pr010-listing-dataset-contract`; commit scope `feat(xdl-pr010-listing-dataset-contract): ...`; depends on PR009.
 
-Commit scope: `chore(xdl-pr006-main-protection-automerge): ...`
+Owned paths: `src/xetra_data_loader/contracts/listings.py`, listing-only fixtures/tests.
 
-Depends on: PR004 + PR005 merged and observed on GitHub Actions.
+Tasks: define raw Bronze listing fields; normalized Silver fields; Gold fields matching PR007; normalize ISIN; freeze `(isin,exchange,code)` identity; define deterministic field ordering.
 
-Owned paths: repository settings plus `docs/repository-governance.md`; no application code.
+Acceptance: non-empty normalized ISIN retained; empty/null ISIN excluded from normalized layer; same ISIN with distinct code remains distinct; round-trip output is deterministic.
 
-Tasks:
+### PR011 — xdl-pr011-quote-dataset-contract
 
-- enable repository auto-merge;
-- protect `main`;
-- require PRs to merge to `main`;
-- require status check `merge-gate`;
-- reject force pushes and branch deletion;
-- prevent normal direct feature pushes;
-- document exact auto-merge procedure for weak agents.
+Branch `feat/xdl-pr011-quote-dataset-contract`; commit scope `feat(xdl-pr011-quote-dataset-contract): ...`; depends on PR009.
 
-Acceptance:
+Owned paths: `src/xetra_data_loader/contracts/quotes.py`, quote-only fixtures/tests.
 
-- GitHub reports `main` protected;
-- direct feature push/force push/delete are denied;
-- representative PR cannot merge while `merge-gate` is pending/failing;
-- representative review-ready PR can be put into auto-merge and completes only after required checks pass.
+Tasks: define Bronze/Silver/Gold quote fields; freeze key `(isin,exchange,code,trade_date)`; derive aware UTC midnight `timestamp_eod`; define semantic comparison fields and seven-day-overlap boundary behavior.
 
-### XDL-PR007 — xdl-pr007-postgres-market-schema
+Acceptance: `timestamp_eod` is UTC midnight; no physical close time is inferred; duplicate key fails; fetch/run metadata does not affect semantic equality.
 
-Branch: `feat/xdl-pr007-postgres-market-schema`
+### PR012 — xdl-pr012-corporate-action-contract
 
-Commit scope: `feat(xdl-pr007-postgres-market-schema): ...`
+Branch `feat/xdl-pr012-corporate-action-contract`; commit scope `feat(xdl-pr012-corporate-action-contract): ...`; depends on PR009.
 
-Depends on: PR006 merged.
+Owned paths: `src/xetra_data_loader/contracts/corporate_actions.py`, corporate-action fixtures/tests.
 
-Owned paths: `sql/schema/001_portfell_market.sql`, `src/xetra_data_loader/contracts/postgres_market.py`, schema-focused tests only.
+Tasks: define separate dividend and split normalized fields; define deterministic SHA-256 `event_key`; define correction and retraction representation; exclude run IDs/fetch timestamps/DB IDs from event identity.
 
-Tasks:
+Acceptance: identical business event gives identical event key; changed business field changes semantic identity/reconciliation deterministically; run metadata change does not alter identity; dividend and split schemas remain distinct.
 
-- create schema `portfell_market`;
-- define `listings`, `eod_quotes`, `dividends`, `splits`;
-- enforce frozen primary/unique business keys;
-- use `TIMESTAMPTZ(6)` for every timestamp field and preserve `trade_date DATE`;
-- define typed DTOs matching DDL exactly;
-- reject naive datetimes.
+### PR013 — xdl-pr013-eodhd-transport
 
-Acceptance:
+Branch `feat/xdl-pr013-eodhd-transport`; commit scope `feat(xdl-pr013-eodhd-transport): ...`; depends on PR006.
 
-- DDL recreates cleanly on empty PostgreSQL;
-- introspection confirms every timestamp is `TIMESTAMPTZ(6)`;
-- DTO/DDL names and nullable rules match;
-- key-violation and naive-datetime tests fail as expected.
+Owned paths: `src/xetra_data_loader/ingestion/eodhd/client.py`, `retry.py`, `rate_limit.py`, transport-only tests/fixtures.
 
-### XDL-PR008 — xdl-pr008-postgres-role-grants
+Tasks: read EODHD token from environment; typed GET transport with timeout; bounded retry/backoff; rate-limit handling; fixture transport seam; scrub credentials from logs/errors.
 
-Branch: `feat/xdl-pr008-postgres-role-grants`
+Acceptance: missing token fails clearly; retryable failure retries within bound; permanent failure surfaces typed error/non-zero behavior; logs contain no token/full secret URL.
 
-Commit scope: `feat(xdl-pr008-postgres-role-grants): ...`
+### PR014 — xdl-pr014-xetra-listing-ingestion
 
-Depends on: PR007 merged.
+Branch `feat/xdl-pr014-xetra-listing-ingestion`; commit scope `feat(xdl-pr014-xetra-listing-ingestion): ...`; depends on PR010+PR013.
 
-Owned paths: `sql/roles/002_loader_roles.sql`, `tests/integration/test_postgres_roles.py`.
+Owned paths: `src/xetra_data_loader/ingestion/listings.py`, listing-ingestion tests/fixtures.
 
-Tasks:
+Tasks: fetch XETRA exchange symbols through PR013; persist raw Bronze payload; normalize via PR010; retain every XETRA row with non-empty normalized ISIN; do not apply ETF/UCITS/type/country/currency filters; preserve duplicate ISIN under distinct identity.
 
-- define `portfell_data_loader` writer grants for loader-owned schemas;
-- define `portfell_app` SELECT-only access to `portfell_market`;
-- deny `portfell_app` mutation/DDL;
-- deny `portfell_app` access to `portfell_loader_sync`.
+Acceptance: mixed fixture retains every non-empty-ISIN identity; only empty/null ISIN is excluded from normalized output; repeated response produces same semantic output.
 
-Acceptance:
+### PR015 — xdl-pr015-eod-quote-ingestion
 
-- writer can perform required market-table DML;
-- app can SELECT market tables;
-- app INSERT/UPDATE/DELETE/DDL fails;
-- app access to loader-sync schema fails.
+Branch `feat/xdl-pr015-eod-quote-ingestion`; commit scope `feat(xdl-pr015-eod-quote-ingestion): ...`; depends on PR011+PR013.
 
-### XDL-PR009 — xdl-pr009-medallion-core-contract
+Owned paths: `src/xetra_data_loader/ingestion/quotes.py`, quote-ingestion tests/fixtures.
 
-Branch: `feat/xdl-pr009-medallion-core-contract`
+Tasks: fetch by exchange/code; full-history mode; incremental start = last business date minus seven calendar days; normalize through PR011; persist Bronze/Silver; detect changed historical rows inside overlap.
 
-Commit scope: `feat(xdl-pr009-medallion-core-contract): ...`
+Acceptance: identical replay = no semantic change; one corrected overlap row detected exactly once; one new business date creates one new business key; all derived timestamps are aware UTC.
 
-Depends on: PR006 merged.
+### PR016 — xdl-pr016-dividend-ingestion
 
-Owned paths: `src/xetra_data_loader/medallion/core.py`, `src/xetra_data_loader/medallion/layout.py`, related unit tests.
+Branch `feat/xdl-pr016-dividend-ingestion`; commit scope `feat(xdl-pr016-dividend-ingestion): ...`; depends on PR012+PR013.
 
-Tasks:
+Owned paths: `src/xetra_data_loader/ingestion/dividends.py`, dividend-only tests/fixtures.
 
-- define Bronze/Silver/Gold path conventions;
-- define immutable manifest structure with dataset, run id, source bounds, counts, fingerprints, timestamps;
-- separate semantic fingerprint fields from run/fetch metadata;
-- define deterministic serialization ordering.
+Tasks: fetch dividends; full-history mode; seven-day-overlap refresh; normalize through PR012; persist Bronze/Silver dividend artifacts; detect dividend corrections and source retractions.
 
-Acceptance:
+Acceptance: identical replay leaves same event keys/semantics; one correction is reconciled once; removed overlap event is marked as retraction; no split code is added or modified.
 
-- identical semantic fixture gives identical semantic fingerprint;
-- run/fetch timestamp-only changes do not alter semantic fingerprint;
-- invalid layer/dataset/path combinations fail closed.
+### PR017 — xdl-pr017-split-ingestion
 
-### XDL-PR010 — xdl-pr010-listing-dataset-contract
+Branch `feat/xdl-pr017-split-ingestion`; commit scope `feat(xdl-pr017-split-ingestion): ...`; depends on PR012+PR013.
 
-Branch: `feat/xdl-pr010-listing-dataset-contract`
+Owned paths: `src/xetra_data_loader/ingestion/splits.py`, split-only tests/fixtures.
 
-Commit scope: `feat(xdl-pr010-listing-dataset-contract): ...`
+Tasks: fetch splits; full-history mode; seven-day-overlap refresh; normalize through PR012; persist Bronze/Silver split artifacts; detect split corrections and source retractions.
 
-Depends on: PR009 merged.
+Acceptance: identical replay leaves same event keys/semantics; one correction is reconciled once; removed overlap event is marked as retraction; no dividend code is added or modified.
 
-Owned paths: `src/xetra_data_loader/contracts/listings.py`, listing fixtures/tests only.
+### PR018 — xdl-pr018-gold-listing-build
 
-Tasks:
+Branch `feat/xdl-pr018-gold-listing-build`; commit scope `feat(xdl-pr018-gold-listing-build): ...`; depends on PR007+PR014.
 
-- define Bronze preservation fields for exchange-symbol response;
-- define normalized Silver listing fields;
-- define Gold listing fields compatible with PR007;
-- freeze `(isin, exchange, code)` identity and ISIN normalization.
+Owned paths: `src/xetra_data_loader/application/gold/listings.py`, listing-Gold tests only.
 
-Acceptance:
+Tasks: build listing Gold from normalized listing input; match PR007 DTO/DDL; enforce required fields and unique listing key; emit row count, semantic fingerprint and validation result.
 
-- non-empty normalized ISIN retained;
-- null/empty ISIN rejected from Silver/Gold;
-- duplicate ISIN under distinct code remains distinct;
-- contract round-trip is deterministic.
+Acceptance: Gold loads into listing table without ad-hoc transformation; duplicate/invalid key fails closed; same semantic input produces same output fingerprint.
 
-### XDL-PR011 — xdl-pr011-quote-dataset-contract
+### PR019 — xdl-pr019-gold-quote-build
 
-Branch: `feat/xdl-pr011-quote-dataset-contract`
+Branch `feat/xdl-pr019-gold-quote-build`; commit scope `feat(xdl-pr019-gold-quote-build): ...`; depends on PR007+PR015.
 
-Commit scope: `feat(xdl-pr011-quote-dataset-contract): ...`
+Owned paths: `src/xetra_data_loader/application/gold/quotes.py`, quote-Gold tests only.
 
-Depends on: PR009 merged.
+Tasks: build quote Gold; match PR007 DTO/DDL; enforce quote business key; enforce `trade_date`/UTC-anchor rules; emit deterministic counts/fingerprint/validation.
 
-Owned paths: `src/xetra_data_loader/contracts/quotes.py`, quote fixtures/tests only.
+Acceptance: Gold loads into quote table directly; duplicate key or naive timestamp fails closed; semantic replay gives identical fingerprint.
 
-Tasks:
+### PR020 — xdl-pr020-gold-dividend-build
 
-- freeze Bronze/Silver/Gold quote fields;
-- freeze business key `(isin, exchange, code, trade_date)`;
-- define canonical UTC `timestamp_eod` from `trade_date`;
-- define seven-day overlap comparison semantics.
+Branch `feat/xdl-pr020-gold-dividend-build`; commit scope `feat(xdl-pr020-gold-dividend-build): ...`; depends on PR007+PR016.
 
-Acceptance:
+Owned paths: `src/xetra_data_loader/application/gold/dividends.py`, dividend-Gold tests only.
 
-- date anchor is timezone-aware UTC midnight;
-- no physical close time is inferred;
-- duplicate business keys fail;
-- semantic equality ignores fetch/run metadata.
+Tasks: build dividend Gold; match PR007 DTO/DDL; enforce dividend business key/event key; carry explicit correction/retraction reconciliation; emit deterministic validation metadata.
 
-### XDL-PR012 — xdl-pr012-corporate-action-contract
+Acceptance: direct load into dividend table succeeds; duplicate/invalid event fails closed; correction/retraction fixture gives exactly intended normalized state; no split files changed.
 
-Branch: `feat/xdl-pr012-corporate-action-contract`
+### PR021 — xdl-pr021-gold-split-build
 
-Commit scope: `feat(xdl-pr012-corporate-action-contract): ...`
+Branch `feat/xdl-pr021-gold-split-build`; commit scope `feat(xdl-pr021-gold-split-build): ...`; depends on PR007+PR017.
 
-Depends on: PR009 merged.
+Owned paths: `src/xetra_data_loader/application/gold/splits.py`, split-Gold tests only.
 
-Owned paths: `src/xetra_data_loader/contracts/corporate_actions.py`, corporate-action fixtures/tests only.
+Tasks: build split Gold; match PR007 DTO/DDL; enforce split business key/event key; carry explicit correction/retraction reconciliation; emit deterministic validation metadata.
 
-Tasks:
+Acceptance: direct load into split table succeeds; duplicate/invalid event fails closed; correction/retraction fixture gives exactly intended normalized state; no dividend files changed.
 
-- define dividend and split Bronze/Silver/Gold fields;
-- define deterministic normalized SHA-256 `event_key`;
-- define correction and retraction representation;
-- exclude run IDs, fetch timestamps, and DB IDs from event identity.
+### PR022 — xdl-pr022-postgres-sync-core
 
-Acceptance:
+Branch `feat/xdl-pr022-postgres-sync-core`; commit scope `feat(xdl-pr022-postgres-sync-core): ...`; depends on PR008+PR009 only.
 
-- same semantic event always yields same `event_key`;
-- changed business field changes `event_key`/correction representation deterministically;
-- run metadata changes do not change event identity.
+Owned paths: `sql/schema/003_portfell_loader_sync.sql`, `src/xetra_data_loader/application/postgres_sync/core.py`, `state.py`, sync-core tests.
 
-### XDL-PR013 — xdl-pr013-eodhd-transport
+Tasks: create `portfell_loader_sync` run/state tables with UTC `TIMESTAMPTZ(6)`; implement semantic row fingerprint helper; define one transaction boundary coupling serving mutation and sync-state advance; define generic insert/update/retraction counters; prove rollback with synthetic fixtures; add no entity-specific publication SQL.
 
-Branch: `feat/xdl-pr013-eodhd-transport`
+Acceptance: injected failure before commit changes neither serving fixture data nor sync state; semantic fingerprint ignores run/fetch metadata; loader timestamp introspection is exact; no listings/quotes/dividends/splits sync implementation exists here.
 
-Commit scope: `feat(xdl-pr013-eodhd-transport): ...`
+### PR023 — xdl-pr023-postgres-listing-sync
 
-Depends on: PR006 merged.
+Branch `feat/xdl-pr023-postgres-listing-sync`; commit scope `feat(xdl-pr023-postgres-listing-sync): ...`; depends on PR018+PR022.
 
-Owned paths: `src/xetra_data_loader/ingestion/eodhd/client.py`, `retry.py`, `rate_limit.py`, transport fixtures/tests.
+Owned paths: `src/xetra_data_loader/application/postgres_sync/listings.py`, listing-sync integration tests.
 
-Tasks:
+Tasks: publish listing Gold using PR022 transaction/state primitives; conflict-safe UPSERT on listing key; compare semantic fingerprints; report insert/update/no-op counts.
 
-- load EODHD token from environment only;
-- implement typed GET transport with timeout;
-- implement bounded retry/backoff for retryable failures;
-- implement rate-limit handling at transport seam;
-- expose deterministic fixture seam for downstream adapter tests;
-- never log credentials/full secret-bearing URLs.
+Acceptance: first fixture inserts expected rows; identical replay produces zero semantic mutations; one changed listing produces exactly one semantic update; failed transaction leaves state/data unchanged.
 
-Acceptance:
+### PR024 — xdl-pr024-postgres-quote-sync
 
-- missing token fails clearly;
-- retryable fixture failure retries within configured bound;
-- permanent failure exits non-zero/raises typed error;
-- logs contain no token.
+Branch `feat/xdl-pr024-postgres-quote-sync`; commit scope `feat(xdl-pr024-postgres-quote-sync): ...`; depends on PR019+PR022.
 
-### XDL-PR014 — xdl-pr014-xetra-listing-ingestion
+Owned paths: `src/xetra_data_loader/application/postgres_sync/quotes.py`, quote-sync integration tests.
 
-Branch: `feat/xdl-pr014-xetra-listing-ingestion`
+Tasks: publish quote Gold using PR022; UPSERT on `(isin,exchange,code,trade_date)`; distinguish no-op/correction/new-date; transactionally advance quote sync state.
 
-Commit scope: `feat(xdl-pr014-xetra-listing-ingestion): ...`
+Acceptance: first fixture inserts expected rows; identical replay = zero mutations; one corrected row = exactly one update; one new date = exactly one insert; rollback preserves state/data.
 
-Depends on: PR010 + PR013 merged.
+### PR025 — xdl-pr025-postgres-dividend-sync
 
-Owned paths: `src/xetra_data_loader/ingestion/listings.py`, listing ingestion tests/fixtures only.
+Branch `feat/xdl-pr025-postgres-dividend-sync`; commit scope `feat(xdl-pr025-postgres-dividend-sync): ...`; depends on PR020+PR022.
 
-Tasks:
+Owned paths: `src/xetra_data_loader/application/postgres_sync/dividends.py`, dividend-sync integration tests.
 
-- call EODHD XETRA exchange-symbol endpoint through PR013;
-- preserve raw Bronze response;
-- normalize Silver via PR010;
-- keep every non-empty-ISIN XETRA row;
-- do not filter ETF/UCITS/type/country/currency;
-- preserve duplicate ISINs under distinct codes.
+Tasks: publish dividend Gold using PR022; reconcile insert/correction/retraction by frozen business identity; transactionally advance dividend state; report exact mutation counts.
 
-Acceptance:
+Acceptance: initial load correct; identical replay = zero mutations; one correction affects only intended event; one retraction removes/deactivates only intended event per contract; rollback preserves state/data; no split files changed.
 
-- mixed fixture retains every non-empty-ISIN identity;
-- null/empty ISIN removed only at normalized layer;
-- repeated payload yields same semantic output.
+### PR026 — xdl-pr026-postgres-split-sync
 
-### XDL-PR015 — xdl-pr015-eod-quote-ingestion
+Branch `feat/xdl-pr026-postgres-split-sync`; commit scope `feat(xdl-pr026-postgres-split-sync): ...`; depends on PR021+PR022.
 
-Branch: `feat/xdl-pr015-eod-quote-ingestion`
+Owned paths: `src/xetra_data_loader/application/postgres_sync/splits.py`, split-sync integration tests.
 
-Commit scope: `feat(xdl-pr015-eod-quote-ingestion): ...`
+Tasks: publish split Gold using PR022; reconcile insert/correction/retraction by frozen business identity; transactionally advance split state; report exact mutation counts.
 
-Depends on: PR011 + PR013 merged.
+Acceptance: initial load correct; identical replay = zero mutations; one correction affects only intended event; one retraction removes/deactivates only intended event per contract; rollback preserves state/data; no dividend files changed.
 
-Owned paths: `src/xetra_data_loader/ingestion/quotes.py`, quote ingestion tests/fixtures only.
+### PR027 — xdl-pr027-weekly-pipeline-orchestrator
 
-Tasks:
+Branch `feat/xdl-pr027-weekly-pipeline-orchestrator`; commit scope `feat(xdl-pr027-weekly-pipeline-orchestrator): ...`; depends on PR023+PR024+PR025+PR026.
 
-- fetch quote history by `(exchange, code)`;
-- support full-history mode;
-- support incremental start = last business date minus seven calendar days;
-- normalize via PR011;
-- detect changed historical rows inside overlap;
-- persist Bronze/Silver artifacts through existing medallion seams.
+Owned paths: `src/xetra_data_loader/application/pipeline.py`, `src/xetra_data_loader/ops/run_weekly.py`, orchestration tests.
 
-Acceptance:
+Tasks: compose exact order `listings -> quotes -> dividends -> splits -> Gold validation -> four PostgreSQL syncs -> verification`; stop on first failure; emit structured stage/run results; expose one non-interactive weekly command; add no lock and no scheduler.
 
-- identical replay creates no semantic change;
-- one corrected overlap row is detected exactly once;
-- one new date appends exactly one key;
-- all timestamps are aware UTC.
+Acceptance: success fixture executes exact order; failed stage prevents every downstream stage; success returns complete stage summary; no cron/locking implementation exists.
 
-### XDL-PR016 — xdl-pr016-dividend-ingestion
+### PR028 — xdl-pr028-loader-lock-restart
 
-Branch: `feat/xdl-pr016-dividend-ingestion`
+Branch `feat/xdl-pr028-loader-lock-restart`; commit scope `feat(xdl-pr028-loader-lock-restart): ...`; depends on PR027.
 
-Commit scope: `feat(xdl-pr016-dividend-ingestion): ...`
+Owned paths: `src/xetra_data_loader/ops/locking.py`, `checkpoints.py`, `locked_runner.py`, related tests.
 
-Depends on: PR012 + PR013 merged.
+Tasks: wrap PR027 runner in one process/distributed lock; deny concurrent weekly invocation; persist restart checkpoints outside semantic row identity; safely recover/release lock after failure; restart without duplicate semantic publication.
 
-Owned paths: `src/xetra_data_loader/ingestion/dividends.py`, dividend tests/fixtures only.
+Acceptance: second concurrent invocation cannot execute pipeline; failure releases/recovers lock safely; restart from fixture failure does not duplicate DB semantic mutations.
 
-Tasks:
+### PR029 — xdl-pr029-sunday-1100-schedule
 
-- fetch dividend history through PR013;
-- support full and seven-day-overlap refresh;
-- normalize events and event keys via PR012;
-- detect corrections/retractions inside overlap.
+Branch `feat/xdl-pr029-sunday-1100-schedule`; commit scope `feat(xdl-pr029-sunday-1100-schedule): ...`; depends on PR027.
 
-Acceptance:
+Owned paths: cron/scheduler deployment files and scheduler tests only.
 
-- identical event replay is stable;
-- correction is detected deterministically;
-- retraction is explicitly represented;
-- no split logic is added.
+Tasks: commit literal `CRON_TZ=Europe/Vienna`; commit literal `0 11 * * 0`; invoke weekly runner entry point; test Vienna-local DST behavior without converting schedule to UTC.
 
-### XDL-PR017 — xdl-pr017-split-ingestion
+Acceptance: committed expression is exact; generated/parsed next-run examples remain Sunday 11:00 Vienna local time before/after DST; no pipeline business code changed.
 
-Branch: `feat/xdl-pr017-split-ingestion`
+### PR030 — xdl-pr030-destructive-reset-guard
 
-Commit scope: `feat(xdl-pr017-split-ingestion): ...`
+Branch `feat/xdl-pr030-destructive-reset-guard`; commit scope `feat(xdl-pr030-destructive-reset-guard): ...`; depends on PR009+PR022.
 
-Depends on: PR012 + PR013 merged.
+Owned paths: `src/xetra_data_loader/ops/destructive_reset.py`, reset-only tests.
 
-Owned paths: `src/xetra_data_loader/ingestion/splits.py`, split tests/fixtures only.
+Tasks: enumerate loader-owned DB schemas/tables and medallion paths; provide dry-run exact scope; require literal `--confirm-destructive-reset`; delete only loader-owned state; never touch unrelated/Portfell optimizer state.
 
-Tasks/Acceptance: same deterministic full/overlap/correction/retraction behavior as PR016, but for splits only; no dividend implementation is modified.
+Acceptance: without confirmation zero destructive actions; dry run lists exact targets; confirmed fixture reset removes all loader-owned targets; unrelated schema/path survives unchanged.
 
-### XDL-PR018 — xdl-pr018-gold-listing-build
+### PR031 — xdl-pr031-full-xetra-bootstrap
 
-Branch: `feat/xdl-pr018-gold-listing-build`
+Branch `feat/xdl-pr031-full-xetra-bootstrap`; commit scope `feat(xdl-pr031-full-xetra-bootstrap): ...`; depends on PR027+PR030.
 
-Commit scope: `feat(xdl-pr018-gold-listing-build): ...`
+Owned paths: `src/xetra_data_loader/ops/bootstrap.py`, bootstrap-only tests.
 
-Depends on: PR007 + PR014 merged.
+Tasks: require/forward destructive confirmation; perform scoped reset; discover full current non-empty-ISIN XETRA universe; run full available quote/dividend/split history; build Gold; publish all entities; verify counts/keys/date bounds/sync state; record measured requests/retries/elapsed time/failures/output rows without estimating duration.
 
-Owned paths: `src/xetra_data_loader/application/gold/listings.py`, Gold listing tests only.
+Acceptance: absent confirmation performs zero reset/bootstrap mutation; clean fixture bootstrap reaches verified serving state; subsequent unchanged weekly fixture run is a semantic no-op; metrics are measured and emitted.
 
-Tasks:
+### PR032 — xdl-pr032-loader-e2e-gate
 
-- convert normalized listing Silver to PR007-compatible Gold;
-- enforce key uniqueness and required fields;
-- emit counts/fingerprint/validation result.
+Branch `test/xdl-pr032-loader-e2e-gate`; commit scope `test(xdl-pr032-loader-e2e-gate): ...`; depends on PR028+PR029+PR031.
 
-Acceptance: Gold loads into listing DDL without transformation; duplicates/invalid ISIN fail closed; same semantic input yields same output fingerprint.
+Owned paths: `tests/e2e/*`, acceptance-report generator and fixture outputs only.
 
-### XDL-PR019 — xdl-pr019-gold-quote-build
+Tasks: bootstrap from empty loader state; verify all fixture non-empty-ISIN listings; verify quote/dividend/split publication; replay unchanged source and assert zero mutations; test one quote correction; test dividend correction/retraction; test split correction/retraction; add a new listing and verify next cycle; introspect exact timestamp types/UTC; verify `portfell_app` read-only; verify lock behavior and exact scheduler; emit machine-readable serving-contract/acceptance report.
 
-Branch: `feat/xdl-pr019-gold-quote-build`
+Acceptance: all scenarios pass on one SHA; lint/type/unit/integration/policy/merge-gate green; no test imports Portfell; machine-readable artifact contains schema version/columns/types/keys/fixture expectations and is sufficient for Portfell cross-repo smoke testing.
 
-Commit scope: `feat(xdl-pr019-gold-quote-build): ...`
+## Cross-repository handoff to Portfell
 
-Depends on: PR007 + PR015 merged.
+Portfell may begin its read-contract work after XDL-PR007 freezes the consumer DDL; permission-level integration waits for XDL-PR008. Portfell's final cross-repository contract gate is blocked until XDL-PR032 is merged and green.
 
-Owned paths: `src/xetra_data_loader/application/gold/quotes.py`, Gold quote tests only.
+Portfell may consume only the PostgreSQL contract, read-only-role contract, and final machine-readable acceptance fixtures/report. It must not import `xetra-data-loader`, call EODHD, read medallion files, or mutate loader schemas.
 
-Tasks/Acceptance: build PR007-compatible quote Gold, enforce key uniqueness, listing identity fields and UTC/date rules, emit deterministic validation metadata; invalid/duplicate rows fail closed.
+## Mapping from superseded coarse loader plan
 
-### XDL-PR020 — xdl-pr020-gold-dividend-build
-
-Branch: `feat/xdl-pr020-gold-dividend-build`
-
-Commit scope: `feat(xdl-pr020-gold-dividend-build): ...`
-
-Depends on: PR007 + PR016 merged.
-
-Owned paths: `src/xetra_data_loader/application/gold/dividends.py`, Gold dividend tests only.
-
-Tasks/Acceptance: build PR007-compatible dividend Gold, reconcile correction/retraction representation, enforce event business key and deterministic validation; no split code changes.
-
-### XDL-PR021 — xdl-pr021-gold-split-build
-
-Branch: `feat/xdl-pr021-gold-split-build`
-
-Commit scope: `feat(xdl-pr021-gold-split-build): ...`
-
-Depends on: PR007 + PR017 merged.
-
-Owned paths: `src/xetra_data_loader/application/gold/splits.py`, Gold split tests only.
-
-Tasks/Acceptance: build PR007-compatible split Gold with the same deterministic validation/reconciliation guarantees as PR020; no dividend code changes.
-
-### XDL-PR022 — xdl-pr022-postgres-sync-core
-
-Branch: `feat/xdl-pr022-postgres-sync-core`
-
-Commit scope: `feat(xdl-pr022-postgres-sync-core): ...`
-
-Depends on: PR008 + PR009 + PR018 + PR019 + PR020 + PR021 merged.
-
-Owned paths: `sql/schema/003_portfell_loader_sync.sql`, `src/xetra_data_loader/application/postgres_sync/core.py`, `state.py`, sync-core tests only.
-
-Tasks:
-
-- create `portfell_loader_sync` run/state tables;
-- define UTC `TIMESTAMPTZ(6)` loader timestamps;
-- implement semantic row fingerprint helper;
-- provide transaction boundary that couples data mutation and sync-state advance;
-- provide generic insert/update/retraction result counters;
-- add rollback integration tests without entity-specific SQL.
-
-Acceptance:
-
-- failure before commit changes neither sync state nor serving data;
-- unchanged semantic row fingerprint is stable across run metadata changes;
-- loader timestamps pass DDL introspection.
-
-### XDL-PR023 — xdl-pr023-postgres-listing-sync
-
-Branch: `feat/xdl-pr023-postgres-listing-sync`
-
-Commit scope: `feat(xdl-pr023-postgres-listing-sync): ...`
-
-Depends on: PR018 + PR022 merged.
-
-Owned paths: `src/xetra_data_loader/application/postgres_sync/listings.py`, listing-sync integration tests only.
-
-Tasks/Acceptance: UPSERT listing Gold on frozen key, advance state transactionally, first load inserts expected count, identical replay causes zero semantic mutations, one changed listing causes exactly one update.
-
-### XDL-PR024 — xdl-pr024-postgres-quote-sync
-
-Branch: `feat/xdl-pr024-postgres-quote-sync`
-
-Commit scope: `feat(xdl-pr024-postgres-quote-sync): ...`
-
-Depends on: PR019 + PR022 merged.
-
-Owned paths: `src/xetra_data_loader/application/postgres_sync/quotes.py`, quote-sync integration tests only.
-
-Tasks/Acceptance: UPSERT quote Gold on `(isin,exchange,code,trade_date)`; identical replay = zero semantic mutations; one correction = exactly one update; one new date = one insert.
-
-### XDL-PR025 — xdl-pr025-postgres-dividend-sync
-
-Branch: `feat/xdl-pr025-postgres-dividend-sync`
-
-Commit scope: `feat(xdl-pr025-postgres-dividend-sync): ...`
-
-Depends on: PR020 + PR022 merged.
-
-Owned paths: `src/xetra_data_loader/application/postgres_sync/dividends.py`, dividend-sync integration tests only.
-
-Tasks/Acceptance: publish dividend Gold transactionally; identical replay = zero mutation; correction/retraction reconciles exactly intended event; no split path changes.
-
-### XDL-PR026 — xdl-pr026-postgres-split-sync
-
-Branch: `feat/xdl-pr026-postgres-split-sync`
-
-Commit scope: `feat(xdl-pr026-postgres-split-sync): ...`
-
-Depends on: PR021 + PR022 merged.
-
-Owned paths: `src/xetra_data_loader/application/postgres_sync/splits.py`, split-sync integration tests only.
-
-Tasks/Acceptance: same guarantees as PR025 for split events only; no dividend path changes.
-
-### XDL-PR027 — xdl-pr027-weekly-pipeline-orchestrator
-
-Branch: `feat/xdl-pr027-weekly-pipeline-orchestrator`
-
-Commit scope: `feat(xdl-pr027-weekly-pipeline-orchestrator): ...`
-
-Depends on: PR023 + PR024 + PR025 + PR026 merged.
-
-Owned paths: `src/xetra_data_loader/application/pipeline.py`, `src/xetra_data_loader/ops/run_weekly.py`, orchestration tests only.
-
-Tasks:
-
-- compose exactly: listings -> quotes -> dividends -> splits -> Gold builds -> four PostgreSQL syncs -> verification;
-- stop immediately on failed stage;
-- emit structured stage/run results;
-- expose one non-interactive weekly command;
-- do not add lock or scheduler behavior yet.
-
-Acceptance:
-
-- fixture run invokes stages in exact order;
-- failure prevents downstream stages;
-- success returns complete deterministic summary;
-- no cron/lock code exists in this PR.
-
-### XDL-PR028 — xdl-pr028-loader-lock-restart
-
-Branch: `feat/xdl-pr028-loader-lock-restart`
-
-Commit scope: `feat(xdl-pr028-loader-lock-restart): ...`
-
-Depends on: PR027 merged.
-
-Owned paths: `src/xetra_data_loader/ops/locking.py`, `checkpoints.py`, `locked_runner.py`, associated tests only.
-
-Tasks:
-
-- provide one process/distributed lock around weekly runner;
-- prevent concurrent duplicate run;
-- persist safe stage checkpoints outside semantic data identity;
-- restart after failed local stage without publishing incomplete downstream state.
-
-Acceptance:
-
-- second concurrent invocation is denied;
-- failed run releases/recovers lock safely;
-- restart does not duplicate semantic PostgreSQL mutations.
-
-### XDL-PR029 — xdl-pr029-sunday-1100-schedule
-
-Branch: `feat/xdl-pr029-sunday-1100-schedule`
-
-Commit scope: `feat(xdl-pr029-sunday-1100-schedule): ...`
-
-Depends on: PR027 merged.
-
-Owned paths: scheduler/cron deployment files and scheduler tests only.
-
-Tasks:
-
-- commit exactly `CRON_TZ=Europe/Vienna`;
-- commit exactly `0 11 * * 0`;
-- invoke the weekly runner entry point;
-- test Vienna-local DST semantics without converting expression to UTC.
-
-Acceptance:
-
-- committed expression is literal and exact;
-- next Sunday invocation remains 11:00 Vienna local time across DST boundaries.
-
-### XDL-PR030 — xdl-pr030-destructive-reset-guard
-
-Branch: `feat/xdl-pr030-destructive-reset-guard`
-
-Commit scope: `feat(xdl-pr030-destructive-reset-guard): ...`
-
-Depends on: PR009 + PR022 merged.
-
-Owned paths: `src/xetra_data_loader/ops/destructive_reset.py`, reset tests only.
-
-Tasks:
-
-- enumerate loader-owned DB schemas/tables and medallion paths;
-- provide dry-run output of exact destruction scope;
-- require literal `--confirm-destructive-reset` for mutation;
-- never include unrelated/Portfell optimizer state;
-- reset loader-owned local state and DB objects only.
-
-Acceptance:
-
-- no confirmation = zero deletion;
-- dry run exactly names target scope;
-- unrelated fixture schema/path survives confirmed reset.
-
-### XDL-PR031 — xdl-pr031-full-xetra-bootstrap
-
-Branch: `feat/xdl-pr031-full-xetra-bootstrap`
-
-Commit scope: `feat(xdl-pr031-full-xetra-bootstrap): ...`
-
-Depends on: PR027 + PR030 merged.
-
-Owned paths: `src/xetra_data_loader/ops/bootstrap.py`, bootstrap tests only.
-
-Tasks:
-
-- call confirmed reset primitive;
-- discover current full XETRA non-empty-ISIN universe;
-- run full-history quote/dividend/split ingestion;
-- build Gold and publish all four datasets;
-- verify counts, keys, date bounds, sync state;
-- record measured request count, retries, elapsed time, failures, output row counts; do not estimate duration.
-
-Acceptance:
-
-- without confirmation no reset/bootstrap mutation occurs;
-- clean fixture bootstrap reaches verified serving state;
-- repeated post-bootstrap weekly run is semantic no-op when source unchanged.
-
-### XDL-PR032 — xdl-pr032-loader-e2e-gate
-
-Branch: `test/xdl-pr032-loader-e2e-gate`
-
-Commit scope: `test(xdl-pr032-loader-e2e-gate): ...`
-
-Depends on: PR028 + PR029 + PR031 merged.
-
-Owned paths: `tests/e2e/*`, acceptance-report generator/fixture outputs only.
-
-Tasks:
-
-- test clean bootstrap from empty loader-owned state;
-- test every fixture non-empty-ISIN XETRA listing retained;
-- test full quote/dividend/split publication;
-- replay unchanged state and assert zero semantic DB mutations;
-- test one quote correction;
-- test dividend/split correction and retraction;
-- add new listing and verify next-cycle ingestion;
-- introspect every timestamp column for exact `TIMESTAMPTZ(6)` and UTC session;
-- verify `portfell_app` read-only permissions;
-- verify lock and exact Sunday schedule;
-- emit machine-readable contract/acceptance artifact for Portfell.
-
-Acceptance:
-
-- all scenarios pass on one commit SHA;
-- `lint`, `type`, `unit`, `integration`, `policy`, and `merge-gate` are green;
-- no test imports Portfell code;
-- acceptance artifact is sufficient for Portfell's cross-repository smoke test.
-
-## 7. Cross-repository handoff
-
-Portfell may begin its read-contract work only after `XDL-PR007` has frozen the serving-table DDL; permission verification additionally depends on `XDL-PR008`. Portfell's final cross-repository contract gate remains blocked until `XDL-PR032` is merged and green.
-
-Portfell consumes only:
-
-- PostgreSQL DDL/column contract;
-- read-only role contract;
-- machine-readable acceptance fixtures/report.
-
-Portfell must not import `xetra-data-loader`, call EODHD, read the loader medallion filesystem, or mutate loader schemas.
-
-## 8. Superseded coarse planning IDs
-
-| Old work order | Replacement |
+| Old plan | Atomic replacement |
 | --- | --- |
-| PR297 repository bootstrap/governance | XDL-PR001 through XDL-PR006 |
-| PR298 PostgreSQL serving contract | XDL-PR007 + XDL-PR008 |
-| PR299 medallion contracts | XDL-PR009 through XDL-PR012 |
-| PR300 listing ingestion | XDL-PR013 + XDL-PR014 |
-| PR301 quote ingestion | XDL-PR011 + XDL-PR013 + XDL-PR015 |
-| PR302 corporate actions | XDL-PR012 + XDL-PR013 + XDL-PR016 + XDL-PR017 |
-| PR303 Gold serving build | XDL-PR018 through XDL-PR021 |
-| PR304 PostgreSQL sync | XDL-PR022 through XDL-PR026 |
-| PR305 weekly runner/schedule | XDL-PR027 + XDL-PR028 + XDL-PR029 |
-| PR306 destructive bootstrap | XDL-PR030 + XDL-PR031 |
+| PR297 repository bootstrap/governance | XDL-PR001..PR006 |
+| PR298 PostgreSQL serving contract | XDL-PR007..PR008 |
+| PR299 medallion contracts | XDL-PR009..PR012 |
+| PR300 listing ingestion | XDL-PR013 + PR014 |
+| PR301 quote ingestion | XDL-PR011 + PR013 + PR015 |
+| PR302 corporate actions | XDL-PR012 + PR013 + PR016 + PR017 |
+| PR303 Gold serving build | XDL-PR018..PR021 |
+| PR304 PostgreSQL sync | XDL-PR022..PR026 |
+| PR305 weekly runner/schedule | XDL-PR027..PR029 |
+| PR306 destructive bootstrap | XDL-PR030..PR031 |
 | PR307 end-to-end gate | XDL-PR032 |
 
-Old PR297-PR307 branches, if ever created, are superseded and must not be merged as implementation authority.
+Any old PR297-PR307 implementation branch is superseded and must not be merged as current authority.
 
-## 9. Loader completion gate
+## Completion gate
 
-The loader side is complete only when all `XDL-PR001`-`XDL-PR032` work orders are merged and the following hold from clean protected `main`:
-
-- Python 3.14.7 `.venv` setup is reproducible and `.venv` is untracked;
-- push/merge quality workflows run lint/type/unit/integration in parallel;
-- Conventional Commit and work-order naming policy is machine-enforced;
-- `main` is protected and requires `merge-gate`;
-- auto-merge cannot complete before required checks pass;
-- every current XETRA non-empty-ISIN listing can be discovered from scratch;
-- full available quote/dividend/split history can be bootstrapped;
-- Gold validates frozen schema/keys/referential rules;
-- PostgreSQL sync is transactional and idempotent;
-- unchanged replay creates zero semantic mutations;
-- corrections/retractions reconcile deterministically;
-- timestamps are `TIMESTAMPTZ(6)` and sessions UTC;
-- `portfell_app` is read-only;
-- exact scheduler is Sunday 11:00 Europe/Vienna;
-- destructive reset requires explicit confirmation and cannot affect unrelated state;
-- final machine-readable acceptance artifact is green and consumable by Portfell.
+Complete only when XDL-PR001..PR032 are merged from clean protected `main` and all conditions hold: Python 3.14.7 `.venv` reproducible/untracked; push+merge gates parallelize lint/type/unit/integration; policy CI enforces Conventional Commits and exact work-order naming; main protected with required merge-gate and gated auto-merge; full XETRA non-empty-ISIN universe discoverable; full quote/dividend/split bootstrap works; Gold validates; PostgreSQL publication transactional/idempotent; unchanged replay is zero-mutation; corrections/retractions deterministic; timestamp contract exact; `portfell_app` read-only; Sunday 11:00 Vienna schedule exact; destructive reset confirmed/scoped; final E2E acceptance artifact green.
