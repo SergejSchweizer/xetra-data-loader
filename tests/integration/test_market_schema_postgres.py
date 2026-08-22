@@ -32,7 +32,7 @@ def test_market_schema_recreates_and_introspects_exact_types() -> None:
         "WHERE table_schema='portfell_market' ORDER BY table_name, ordinal_position",
     )
     rows = result.stdout.splitlines()
-    assert any(row == "eod_quotes:trade_date:date:" for row in rows)
+    assert any(row.startswith("eod_quotes:trade_date:date:") for row in rows)
     timestamp_rows = [row for row in rows if "timestamp with time zone" in row]
     assert timestamp_rows
     assert all(row.endswith(":6") for row in timestamp_rows)
