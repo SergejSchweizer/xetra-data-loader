@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-
 DSN = os.getenv("XDL_TEST_POSTGRES_DSN")
 pytestmark = pytest.mark.integration
 
