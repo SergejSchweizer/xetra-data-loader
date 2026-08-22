@@ -38,6 +38,12 @@ def _event(value: str) -> DividendEvent:
     )
 
 
+def _dividend_count(connection: object) -> tuple[int]:
+    return connection.execute(
+        "SELECT count(*) FROM portfell_market.dividends"
+    ).fetchone()
+
+
 def test_dividend_sync_initial_replay_correction_and_retraction() -> None:
     if DSN is None:
         pytest.skip("XDL_TEST_POSTGRES_DSN is not configured")
@@ -87,7 +93,7 @@ def test_dividend_sync_initial_replay_correction_and_retraction() -> None:
         )
         assert correction.counters.inserted == 1
         assert correction.counters.retracted == 1
-        assert connection.execute("SELECT count(*) FROM portfell_market.dividends").fetchone() == (1,)
+        assert _dividend_count(connection) == (1,)
 
         removed = sync_dividends(
             connection,
@@ -96,6 +102,6 @@ def test_dividend_sync_initial_replay_correction_and_retraction() -> None:
             published_at_utc=published,
         )
         assert removed.counters.retracted == 1
-        assert connection.execute("SELECT count(*) FROM portfell_market.dividends").fetchone() == (0,)
+        assert _dividend_count(connection) == (0,)
     finally:
         connection.close()
