@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-
 _ZERO = timedelta(0)
 
 
@@ -69,7 +68,10 @@ class QuoteRow:
         _require_utc("timestamp_eod", self.timestamp_eod)
         _require_utc("fetched_at_utc", self.fetched_at_utc)
         _require_utc("published_at_utc", self.published_at_utc)
-        if self.timestamp_eod.date() != self.trade_date or self.timestamp_eod.time() != datetime.min.time():
+        if (
+            self.timestamp_eod.date() != self.trade_date
+            or self.timestamp_eod.time() != datetime.min.time()
+        ):
             raise ValueError("timestamp_eod must equal trade_date at 00:00:00 UTC")
         if self.volume is not None and self.volume < 0:
             raise ValueError("volume must be non-negative")
