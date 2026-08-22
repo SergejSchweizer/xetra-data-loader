@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 xdl-weekly = "xetra_data_loader.pipeline.orchestrator:main"
+xdl-bootstrap = "xetra_data_loader.ops.bootstrap:main"
 
 [project.optional-dependencies]
 dev = [
