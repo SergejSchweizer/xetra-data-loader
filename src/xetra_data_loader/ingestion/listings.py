@@ -42,8 +42,7 @@ def ingest_xetra_listings(transport: JsonTransport) -> ListingIngestionResult:
     for item in payload:
         if not isinstance(item, dict):
             raise ValueError("each EODHD XETRA listing must be a JSON object")
-        typed_item = cast(dict[str, JSONValue], item)
-        bronze_rows.append(typed_item)
+        bronze_rows.append(item)
         rows.append(cast(dict[str, object], item))
 
     bronze_rows.sort(key=_canonical_row)
