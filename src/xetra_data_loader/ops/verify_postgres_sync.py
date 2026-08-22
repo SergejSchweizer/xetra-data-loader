@@ -399,7 +399,12 @@ def _verify_target(connection: Connection[Any]) -> tuple[str, int, tuple[str, ..
     port = int(connection.info.port)
     try:
         addresses = tuple(
-            sorted({entry[4][0] for entry in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)})
+            sorted(
+                {
+                    entry[4][0]
+                    for entry in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+                }
+            )
         )
     except OSError:
         addresses = ()
