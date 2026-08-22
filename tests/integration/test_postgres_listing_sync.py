@@ -1,0 +1,80 @@
+import os
+import subprocess
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+
+from xetra_data_loader.contracts.listings import ListingRecord
+from xetra_data_loader.gold.listings import build_listing_gold
+from xetra_data_loader.sync import connect_postgres
+from xetra_data_loader.sync.listings import sync_listings
+
+DSN = os.getenv("XDL_TEST_POSTGRES_DSN")
+pytestmark = pytest.mark.integration
+
+
+def _apply_sql(path: str) -> None:
+    if DSN is None:
+        pytest.skip("XDL_TEST_POSTGRES_DSN is not configured")
+    subprocess.run(
+        ["psql", DSN, "-X", "-v", "ON_ERROR_STOP=1"],
+        check=True,
+        text=True,
+        input=Path(path).read_text(encoding="utf-8"),
+        capture_output=True,
+    )
+
+
+def test_listing_sync_initial_replay_and_one_update() -> None:
+    if DSN is None:
+        pytest.skip("XDL_TEST_POSTGRES_DSN is not configured")
+    _apply_sql("sql/schema/001_portfell_market.sql")
+    _apply_sql("sql/schema/002_roles.sql")
+    _apply_sql("sql/sync/001_portfell_loader_sync.sql")
+    connection = connect_postgres(DSN)
+    try:
+        with connection.transaction():
+            connection.execute("TRUNCATE portfell_market.listings CASCADE")
+            connection.execute(
+                "DELETE FROM portfell_loader_sync.loader_runs WHERE dataset = 'listings'"
+            )
+            connection.execute(
+                "DELETE FROM portfell_loader_sync.sync_state WHERE dataset = 'listings'"
+            )
+
+        published = datetime(2026, 8, 22, 20, 0, tzinfo=UTC)
+        first_gold = build_listing_gold(
+            [ListingRecord("DE0000000001", "XETRA", "AAA", name="A")]
+        )
+        first = sync_listings(
+            connection,
+            first_gold,
+            run_id="listing-first",
+            published_at_utc=published,
+        )
+        assert first.counters.inserted == 1
+        replay = sync_listings(
+            connection,
+            first_gold,
+            run_id="listing-replay",
+            published_at_utc=published,
+        )
+        assert replay.status == "noop"
+        assert replay.counters.total_mutations == 0
+
+        changed_gold = build_listing_gold(
+            [ListingRecord("DE0000000001", "XETRA", "AAA", name="Changed")]
+        )
+        changed = sync_listings(
+            connection,
+            changed_gold,
+            run_id="listing-change",
+            published_at_utc=published,
+        )
+        assert changed.counters.updated == 1
+        assert connection.execute(
+            "SELECT name FROM portfell_market.listings WHERE code = 'AAA'"
+        ).fetchone() == ("Changed",)
+    finally:
+        connection.close()
