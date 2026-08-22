@@ -7,7 +7,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Protocol, cast
+from typing import Protocol
 
 from xetra_data_loader.contracts.corporate_actions import (
     ActionStatus,
@@ -58,11 +58,12 @@ def ingest_dividends(
     for item in payload:
         if not isinstance(item, dict):
             raise ValueError("each EODHD dividend must be a JSON object")
-        row = cast(dict[str, JSONValue], item)
-        bronze_rows.append(row)
-        current.append(_normalize_dividend(listing, row))
+        bronze_rows.append(item)
+        current.append(_normalize_dividend(listing, item))
 
-    active_previous = tuple(record for record in previous_records if record.status is ActionStatus.ACTIVE)
+    active_previous = tuple(
+        record for record in previous_records if record.status is ActionStatus.ACTIVE
+    )
     previous_by_date = _unique_by_date(active_previous)
     current_by_date = _unique_by_date(current)
     reconciled: list[DividendEvent] = list(current_by_date.values())
