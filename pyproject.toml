@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "xetra-data-loader"
+version = "0.1.0"
+description = "Deterministic XETRA market-data loader with Bronze/Silver/Gold medallion storage and PostgreSQL publication."
+readme = "README.md"
+requires-python = "==3.14.7"
+authors = [{ name = "Sergej Schweizer" }]
+license = { text = "Proprietary" }
+dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/xetra_data_loader"]
