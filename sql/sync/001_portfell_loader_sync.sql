@@ -29,9 +29,9 @@ CREATE TABLE IF NOT EXISTS portfell_loader_sync.loader_runs (
 
 REVOKE ALL ON SCHEMA portfell_loader_sync FROM PUBLIC;
 REVOKE ALL ON ALL TABLES IN SCHEMA portfell_loader_sync FROM PUBLIC;
-GRANT USAGE, CREATE ON SCHEMA portfell_loader_sync TO portfell_data_loader;
+GRANT USAGE, CREATE ON SCHEMA portfell_loader_sync TO "xetra-data-loader";
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA portfell_loader_sync
-    TO portfell_data_loader;
+    TO "xetra-data-loader";
 REVOKE ALL ON SCHEMA portfell_loader_sync FROM portfell_app;
 REVOKE ALL ON ALL TABLES IN SCHEMA portfell_loader_sync FROM portfell_app;
 

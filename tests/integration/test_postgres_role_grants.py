@@ -34,7 +34,7 @@ def test_writer_and_read_only_grants() -> None:
     privileges = _psql(
         "-At",
         "-c",
-        "SELECT has_table_privilege('portfell_data_loader', "
+        "SELECT has_table_privilege('xetra-data-loader', "
         "'portfell_market.listings', 'INSERT,UPDATE,DELETE'), "
         "has_table_privilege('portfell_app', 'portfell_market.listings', 'SELECT'), "
         "has_table_privilege('portfell_app', 'portfell_market.listings', 'INSERT,UPDATE,DELETE'), "

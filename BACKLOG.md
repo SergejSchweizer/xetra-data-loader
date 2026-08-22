@@ -230,7 +230,7 @@ Acceptance: DDL recreates on empty PostgreSQL; introspection/types/keys exact; d
 ### PR008 — xdl-pr008-postgres-role-grants
 Branch `feat/xdl-pr008-postgres-role-grants`; commit scope `feat(xdl-pr008-postgres-role-grants): ...`; depends on PR007.
 Owned paths: role SQL + role integration test.
-Tasks: `portfell_data_loader` writer; `portfell_app` SELECT-only market schema; deny app DML/DDL and loader-sync access.
+Tasks: `xetra-data-loader` writer; `portfell_app` SELECT-only market schema; deny app DML/DDL and loader-sync access.
 Acceptance: required writer DML works; all forbidden app operations fail.
 
 ### PR009 — xdl-pr009-medallion-core-contract
