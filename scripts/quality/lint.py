@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import sys
-
 from _runner import run_module
 
 
