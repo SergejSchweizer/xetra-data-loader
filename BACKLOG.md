@@ -46,7 +46,7 @@ Frozen rules:
 - `timestamp_eod = trade_date 00:00:00+00:00`; it is not a physical exchange-close timestamp;
 - incremental refresh overlap: seven calendar days;
 - unchanged source replay must cause zero semantic PostgreSQL mutations;
-- exact scheduler: `CRON_TZ=Europe/Vienna` and `0 11 * * 0`;
+- exact scheduler: `CRON_TZ=Europe/Vienna` and `0 12 * * 0`;
 - passwords, provider tokens, and full DSNs are never committed;
 - Portfell code, analytics, UI, users/tenants/projects, and authorization do not belong here;
 - the project is not complete until a real full XETRA bootstrap has been completely synchronized to PostgreSQL `10.10.1.3:54321` and independently verified by XDL-PR033.
@@ -356,8 +356,8 @@ Acceptance: second concurrent run denied; failed run recovers; restart produces 
 ### PR029 — xdl-pr029-sunday-1100-schedule
 Branch `feat/xdl-pr029-sunday-1100-schedule`; commit scope `feat(xdl-pr029-sunday-1100-schedule): ...`; depends on PR027.
 Owned paths: cron/scheduler deployment config + tests.
-Tasks: literal `CRON_TZ=Europe/Vienna`; literal `0 11 * * 0`; invoke weekly runner; DST tests.
-Acceptance: expression exact and remains Sunday 11:00 Vienna before/after DST; no pipeline business code changed.
+Tasks: literal `CRON_TZ=Europe/Vienna`; literal `0 12 * * 0`; invoke weekly runner; DST tests.
+Acceptance: expression exact and remains Sunday 12:00 Vienna before/after DST; no pipeline business code changed.
 
 ### PR030 — xdl-pr030-destructive-reset-guard
 Branch `feat/xdl-pr030-destructive-reset-guard`; commit scope `feat(xdl-pr030-destructive-reset-guard): ...`; depends on PR009+PR022.
@@ -465,7 +465,7 @@ Any old PR297-PR307 implementation branch is superseded and must not be merged a
 - unchanged replay is zero-mutation;
 - timestamp contract is exactly `TIMESTAMPTZ(6)` + UTC;
 - `portfell_app` is SELECT-only;
-- Sunday schedule is exactly 11:00 Europe/Vienna;
+- Sunday schedule is exactly 12:00 Europe/Vienna;
 - destructive reset is explicit and scoped;
 - XDL-PR032 production-like E2E artifact is green;
 - **a complete real synchronization has been executed against PostgreSQL `10.10.1.3:54321`;**

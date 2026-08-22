@@ -1,2 +1,2 @@
 CRON_TZ=Europe/Vienna
-0 11 * * 0 cd /home/dev_xetra/xetra-data-loader && /usr/bin/flock -n .data/medallion/weekly.lock .venv/bin/xdl-weekly --factory xetra_data_loader.pipeline.runtime:build_weekly_stages >> artifacts/cron/xdl-weekly.log 2>&1
+0 12 * * 0 cd /home/dev_xetra/xetra-data-loader && /usr/bin/flock -n .data/medallion/weekly.lock .venv/bin/xdl-weekly --factory xetra_data_loader.pipeline.runtime:build_weekly_stages >> artifacts/cron/xdl-weekly.log 2>&1

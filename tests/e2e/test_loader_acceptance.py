@@ -285,7 +285,7 @@ def test_complete_loader_acceptance_matrix(tmp_path: Path) -> None:
         app_role="portfell_app",
         app_role_select_only=role_contract,
         scheduler_timezone="Europe/Vienna",
-        scheduler_expression="0 11 * * 0",
+        scheduler_expression="0 12 * * 0",
         portfell_imports=portfell_imports,
     )
     assert report.passed
@@ -342,7 +342,7 @@ def _lock_contract_holds(tmp_path: Path) -> bool:
 
 def _scheduler_contract() -> bool:
     lines = Path("deploy/cron/xetra-data-loader.cron").read_text(encoding="utf-8").splitlines()
-    return lines[0] == "CRON_TZ=Europe/Vienna" and lines[1].startswith("0 11 * * 0 ")
+    return lines[0] == "CRON_TZ=Europe/Vienna" and lines[1].startswith("0 12 * * 0 ")
 
 
 def _count_portfell_imports() -> int:
