@@ -1,4 +1,4 @@
-"""Typed rows for the frozen ``xetra_market`` PostgreSQL contract."""
+"""Typed rows for the frozen ``xetra_loader`` PostgreSQL contract."""
 
 from __future__ import annotations
 

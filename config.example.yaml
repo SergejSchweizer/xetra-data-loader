@@ -13,4 +13,4 @@ postgres:
   # database: ""
 
 medallion:
-  root: ".data/medallion"
+  root: "./lake"

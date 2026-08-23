@@ -24,7 +24,7 @@ EODHD
   -> xetra-loader
        Bronze -> Silver -> Gold
        -> PostgreSQL 10.10.1.3:54321
-            xetra_market
+            xetra_loader
             xetra_loader_sync
                  |
                  | SELECT only as portfell_app
@@ -223,8 +223,8 @@ Acceptance: GitHub reports protection active; representative PR cannot merge bef
 
 ### PR007 — xdl-pr007-postgres-market-schema
 Branch `feat/xdl-pr007-postgres-market-schema`; commit scope `feat(xdl-pr007-postgres-market-schema): ...`; depends on PR006.
-Owned paths: `sql/schema/001_xetra_market.sql`, typed market DTOs, schema tests.
-Tasks: create `xetra_market`; tables `listings`, `eod_quotes`, `dividends`, `splits`; frozen keys; exact `TIMESTAMPTZ(6)`; `trade_date DATE`; reject naive datetime DTOs.
+Owned paths: `sql/schema/001_xetra_loader.sql`, typed market DTOs, schema tests.
+Tasks: create `xetra_loader`; tables `listings`, `eod_quotes`, `dividends`, `splits`; frozen keys; exact `TIMESTAMPTZ(6)`; `trade_date DATE`; reject naive datetime DTOs.
 Acceptance: DDL recreates on empty PostgreSQL; introspection/types/keys exact; duplicate keys and naive datetimes fail.
 
 ### PR008 — xdl-pr008-postgres-role-grants

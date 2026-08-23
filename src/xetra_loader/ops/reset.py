@@ -14,7 +14,7 @@ from psycopg import Connection
 from xetra_loader.sync import connect_postgres
 
 CONFIRM_FLAG = "--confirm-destructive-reset"
-_OWNED_SCHEMAS = ("xetra_loader_sync", "xetra_market")
+_OWNED_SCHEMAS = ("xetra_loader_sync", "xetra_loader")
 _OWNED_LAYERS = ("bronze", "silver", "gold")
 
 

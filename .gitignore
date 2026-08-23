@@ -13,3 +13,4 @@ build/
 .env
 config.yaml
 .data/
+lake/

@@ -30,15 +30,15 @@ EXPECTED_PORT = 54321
 DATASETS = ("listings", "eod_quotes", "dividends", "splits")
 
 _EXPECTED_TIMESTAMP_COLUMNS = {
-    ("xetra_market", "listings", "fetched_at_utc"),
-    ("xetra_market", "listings", "published_at_utc"),
-    ("xetra_market", "eod_quotes", "timestamp_eod"),
-    ("xetra_market", "eod_quotes", "fetched_at_utc"),
-    ("xetra_market", "eod_quotes", "published_at_utc"),
-    ("xetra_market", "dividends", "fetched_at_utc"),
-    ("xetra_market", "dividends", "published_at_utc"),
-    ("xetra_market", "splits", "fetched_at_utc"),
-    ("xetra_market", "splits", "published_at_utc"),
+    ("xetra_loader", "listings", "fetched_at_utc"),
+    ("xetra_loader", "listings", "published_at_utc"),
+    ("xetra_loader", "eod_quotes", "timestamp_eod"),
+    ("xetra_loader", "eod_quotes", "fetched_at_utc"),
+    ("xetra_loader", "eod_quotes", "published_at_utc"),
+    ("xetra_loader", "dividends", "fetched_at_utc"),
+    ("xetra_loader", "dividends", "published_at_utc"),
+    ("xetra_loader", "splits", "fetched_at_utc"),
+    ("xetra_loader", "splits", "published_at_utc"),
     ("xetra_loader_sync", "sync_state", "synced_at_utc"),
     ("xetra_loader_sync", "loader_runs", "started_at_utc"),
     ("xetra_loader_sync", "loader_runs", "finished_at_utc"),
@@ -434,21 +434,21 @@ def _fetch_semantic_rows(
     queries = {
         "listings": (
             "SELECT isin, exchange, code, name, instrument_type, currency, country "
-            "FROM xetra_market.listings ORDER BY isin, exchange, code"
+            "FROM xetra_loader.listings ORDER BY isin, exchange, code"
         ),
         "eod_quotes": (
             "SELECT isin, exchange, code, trade_date, timestamp_eod, open, high, low, close, "
-            "adjusted_close, volume FROM xetra_market.eod_quotes "
+            "adjusted_close, volume FROM xetra_loader.eod_quotes "
             "ORDER BY isin, exchange, code, trade_date"
         ),
         "dividends": (
             "SELECT isin, exchange, code, event_key, event_date, declaration_date, record_date, "
-            "payment_date, value, currency, period FROM xetra_market.dividends "
+            "payment_date, value, currency, period FROM xetra_loader.dividends "
             "ORDER BY isin, exchange, code, event_key"
         ),
         "splits": (
             "SELECT isin, exchange, code, event_key, event_date, split_ratio, split_factor "
-            "FROM xetra_market.splits ORDER BY isin, exchange, code, event_key"
+            "FROM xetra_loader.splits ORDER BY isin, exchange, code, event_key"
         ),
     }
     if dataset not in queries:
@@ -567,7 +567,7 @@ def _duplicate_key_count(connection: Connection[Any], dataset: str) -> int:
     columns = keys[dataset]
     query = (
         f'SELECT COALESCE(sum(n - 1), 0) FROM ('
-        f'SELECT count(*) AS n FROM xetra_market."{dataset}" '
+        f'SELECT count(*) AS n FROM xetra_loader."{dataset}" '
         f'GROUP BY {columns} HAVING count(*) > 1) duplicates'
     )
     row = connection.execute(query).fetchone()
@@ -580,8 +580,8 @@ def _orphan_counts(connection: Connection[Any]) -> dict[str, int]:
     result: dict[str, int] = {}
     for dataset in ("eod_quotes", "dividends", "splits"):
         query = (
-            f'SELECT count(*) FROM xetra_market."{dataset}" child '
-            "LEFT JOIN xetra_market.listings parent "
+            f'SELECT count(*) FROM xetra_loader."{dataset}" child '
+            "LEFT JOIN xetra_loader.listings parent "
             "ON parent.isin = child.isin AND parent.exchange = child.exchange "
             "AND parent.code = child.code WHERE parent.isin IS NULL"
         )
@@ -613,7 +613,7 @@ def _verify_timestamps(connection: Connection[Any]) -> TimestampVerification:
     rows = connection.execute(
         "SELECT table_schema, table_name, column_name, data_type, datetime_precision "
         "FROM information_schema.columns "
-        "WHERE table_schema IN ('xetra_market', 'xetra_loader_sync') "
+        "WHERE table_schema IN ('xetra_loader', 'xetra_loader_sync') "
         "AND data_type LIKE 'timestamp%' ORDER BY table_schema, table_name, column_name"
     ).fetchall()
     seen: set[tuple[str, str, str]] = set()
@@ -649,32 +649,32 @@ def _verify_app_role(connection: Connection[Any]) -> RoleVerification:
         select_tables = {
             dataset: _statement_succeeds(
                 cursor,
-                f'SELECT 1 FROM xetra_market."{dataset}" LIMIT 0',
+                f'SELECT 1 FROM xetra_loader."{dataset}" LIMIT 0',
                 f"select_{dataset}",
             )
             for dataset in DATASETS
         }
         insert_denied = _statement_denied(
             cursor,
-            "INSERT INTO xetra_market.listings "
+            "INSERT INTO xetra_loader.listings "
             "(isin, exchange, code, fetched_at_utc, published_at_utc) "
             "SELECT isin, exchange, code, fetched_at_utc, published_at_utc "
-            "FROM xetra_market.listings WHERE false",
+            "FROM xetra_loader.listings WHERE false",
             "insert_probe",
         )
         update_denied = _statement_denied(
             cursor,
-            "UPDATE xetra_market.listings SET code = code WHERE false",
+            "UPDATE xetra_loader.listings SET code = code WHERE false",
             "update_probe",
         )
         delete_denied = _statement_denied(
             cursor,
-            "DELETE FROM xetra_market.listings WHERE false",
+            "DELETE FROM xetra_loader.listings WHERE false",
             "delete_probe",
         )
         ddl_denied = _statement_denied(
             cursor,
-            "CREATE TABLE xetra_market.__xdl_privilege_probe (id integer)",
+            "CREATE TABLE xetra_loader.__xdl_privilege_probe (id integer)",
             "ddl_probe",
         )
         sync_denied = _statement_denied(

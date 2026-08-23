@@ -39,7 +39,7 @@ def sync_quotes(
         for row in gold.rows:
             cursor.execute(
                 "SELECT open, high, low, close, adjusted_close, volume "
-                "FROM xetra_market.eod_quotes "
+                "FROM xetra_loader.eod_quotes "
                 "WHERE isin = %s AND exchange = %s AND code = %s AND trade_date = %s",
                 row.key,
             )
@@ -54,7 +54,7 @@ def sync_quotes(
             )
             if existing is None:
                 cursor.execute(
-                    "INSERT INTO xetra_market.eod_quotes "
+                    "INSERT INTO xetra_loader.eod_quotes "
                     "(isin, exchange, code, trade_date, timestamp_eod, open, high, low, close, "
                     "adjusted_close, volume, fetched_at_utc, published_at_utc) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
@@ -69,7 +69,7 @@ def sync_quotes(
                 inserted += 1
             elif existing != semantic:
                 cursor.execute(
-                    "UPDATE xetra_market.eod_quotes SET timestamp_eod = %s, open = %s, "
+                    "UPDATE xetra_loader.eod_quotes SET timestamp_eod = %s, open = %s, "
                     "high = %s, low = %s, close = %s, adjusted_close = %s, volume = %s, "
                     "fetched_at_utc = %s, published_at_utc = %s "
                     "WHERE isin = %s AND exchange = %s AND code = %s AND trade_date = %s",

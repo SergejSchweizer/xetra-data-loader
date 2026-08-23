@@ -29,7 +29,7 @@ def sync_listings(
         for row in gold.rows:
             cursor.execute(
                 "SELECT name, instrument_type, currency, country "
-                "FROM xetra_market.listings "
+                "FROM xetra_loader.listings "
                 "WHERE isin = %s AND exchange = %s AND code = %s",
                 row.key,
             )
@@ -40,7 +40,7 @@ def sync_listings(
             semantic = (row.name, row.instrument_type, row.currency, row.country)
             if existing is None:
                 cursor.execute(
-                    "INSERT INTO xetra_market.listings "
+                    "INSERT INTO xetra_loader.listings "
                     "(isin, exchange, code, name, instrument_type, currency, country, "
                     "fetched_at_utc, published_at_utc) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
@@ -49,7 +49,7 @@ def sync_listings(
                 inserted += 1
             elif existing != semantic:
                 cursor.execute(
-                    "UPDATE xetra_market.listings SET name = %s, instrument_type = %s, "
+                    "UPDATE xetra_loader.listings SET name = %s, instrument_type = %s, "
                     "currency = %s, country = %s, fetched_at_utc = %s, published_at_utc = %s "
                     "WHERE isin = %s AND exchange = %s AND code = %s",
                     (*semantic, published_at, published_at, *row.key),

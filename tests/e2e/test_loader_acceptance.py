@@ -298,7 +298,7 @@ def test_complete_loader_acceptance_matrix(tmp_path: Path) -> None:
 
 
 def _timestamp_contract_is_exact() -> bool:
-    market = Path("sql/schema/001_xetra_market.sql").read_text(encoding="utf-8")
+    market = Path("sql/schema/001_xetra_loader.sql").read_text(encoding="utf-8")
     sync = Path("sql/sync/001_xetra_loader_sync.sql").read_text(encoding="utf-8")
     required = (
         "fetched_at_utc TIMESTAMPTZ(6) NOT NULL",
@@ -318,7 +318,7 @@ def _timestamp_contract_is_exact() -> bool:
 def _app_role_is_select_only() -> bool:
     roles = Path("sql/schema/002_roles.sql").read_text(encoding="utf-8")
     return (
-        "GRANT SELECT ON ALL TABLES IN SCHEMA xetra_market TO portfell_app" in roles
+        "GRANT SELECT ON ALL TABLES IN SCHEMA xetra_loader TO portfell_app" in roles
         and "REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER" in roles
         and "REVOKE ALL ON SCHEMA xetra_loader_sync FROM portfell_app" in roles
     )

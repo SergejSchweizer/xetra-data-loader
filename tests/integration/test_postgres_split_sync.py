@@ -42,13 +42,13 @@ def _event(ratio: str) -> SplitEvent:
 def test_split_sync_initial_replay_correction_and_retraction() -> None:
     if DSN is None:
         pytest.skip("XDL_TEST_POSTGRES_DSN is not configured")
-    _apply_sql("sql/schema/001_xetra_market.sql")
+    _apply_sql("sql/schema/001_xetra_loader.sql")
     _apply_sql("sql/schema/002_roles.sql")
     _apply_sql("sql/sync/001_xetra_loader_sync.sql")
     connection = connect_postgres(DSN)
     try:
         with connection.transaction():
-            connection.execute("TRUNCATE xetra_market.listings CASCADE")
+            connection.execute("TRUNCATE xetra_loader.listings CASCADE")
             connection.execute(
                 "DELETE FROM xetra_loader_sync.loader_runs WHERE dataset = 'splits'"
             )
@@ -56,7 +56,7 @@ def test_split_sync_initial_replay_correction_and_retraction() -> None:
                 "DELETE FROM xetra_loader_sync.sync_state WHERE dataset = 'splits'"
             )
             connection.execute(
-                "INSERT INTO xetra_market.listings "
+                "INSERT INTO xetra_loader.listings "
                 "(isin, exchange, code, fetched_at_utc, published_at_utc) "
                 "VALUES ('DE0000000001', 'XETRA', 'AAA', now(), now())"
             )
@@ -88,7 +88,7 @@ def test_split_sync_initial_replay_correction_and_retraction() -> None:
         )
         assert correction.counters.inserted == 1
         assert correction.counters.retracted == 1
-        assert connection.execute("SELECT count(*) FROM xetra_market.splits").fetchone() == (1,)
+        assert connection.execute("SELECT count(*) FROM xetra_loader.splits").fetchone() == (1,)
 
         removed = sync_splits(
             connection,
@@ -97,6 +97,6 @@ def test_split_sync_initial_replay_correction_and_retraction() -> None:
             published_at_utc=published,
         )
         assert removed.counters.retracted == 1
-        assert connection.execute("SELECT count(*) FROM xetra_market.splits").fetchone() == (0,)
+        assert connection.execute("SELECT count(*) FROM xetra_loader.splits").fetchone() == (0,)
     finally:
         connection.close()

@@ -25,9 +25,9 @@ def _psql(
 
 
 def test_writer_and_read_only_grants() -> None:
-    schema_sql = Path("sql/schema/001_xetra_market.sql").read_text(encoding="utf-8")
+    schema_sql = Path("sql/schema/001_xetra_loader.sql").read_text(encoding="utf-8")
     grants_sql = Path("sql/schema/002_roles.sql").read_text(encoding="utf-8")
-    _psql("-c", "DROP SCHEMA IF EXISTS xetra_market CASCADE")
+    _psql("-c", "DROP SCHEMA IF EXISTS xetra_loader CASCADE")
     _psql(input_text=schema_sql)
     _psql(input_text=grants_sql)
 
@@ -35,16 +35,16 @@ def test_writer_and_read_only_grants() -> None:
         "-At",
         "-c",
         "SELECT has_table_privilege('xetra-loader', "
-        "'xetra_market.listings', 'INSERT,UPDATE,DELETE'), "
-        "has_table_privilege('portfell_app', 'xetra_market.listings', 'SELECT'), "
-        "has_table_privilege('portfell_app', 'xetra_market.listings', 'INSERT,UPDATE,DELETE'), "
-        "has_schema_privilege('portfell_app', 'xetra_market', 'CREATE')",
+        "'xetra_loader.listings', 'INSERT,UPDATE,DELETE'), "
+        "has_table_privilege('portfell_app', 'xetra_loader.listings', 'SELECT'), "
+        "has_table_privilege('portfell_app', 'xetra_loader.listings', 'INSERT,UPDATE,DELETE'), "
+        "has_schema_privilege('portfell_app', 'xetra_loader', 'CREATE')",
     ).stdout.strip()
     assert privileges == "t|t|f|f"
 
     forbidden = _psql(
         "-c",
-        "SET ROLE portfell_app; INSERT INTO xetra_market.listings "
+        "SET ROLE portfell_app; INSERT INTO xetra_loader.listings "
         "(isin, exchange, code, fetched_at_utc, published_at_utc) "
         "VALUES ('DE0000000001', 'XETRA', 'AAA', now(), now())",
         check=False,

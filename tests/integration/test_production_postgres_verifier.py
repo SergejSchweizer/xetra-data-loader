@@ -170,7 +170,7 @@ def _passing_report() -> ProductionAcceptanceReport:
         orphan_counts={"eod_quotes": 0, "dividends": 0, "splits": 0},
         timestamps=TimestampVerification(
             session_timezone="UTC",
-            checked_columns=("xetra_market.listings.fetched_at_utc",),
+            checked_columns=("xetra_loader.listings.fetched_at_utc",),
             invalid_columns=(),
             missing_columns=(),
         ),

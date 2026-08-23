@@ -45,13 +45,13 @@ def _quote(day: int, close: str) -> QuoteRecord:
 def test_quote_sync_initial_replay_correction_and_new_date() -> None:
     if DSN is None:
         pytest.skip("XDL_TEST_POSTGRES_DSN is not configured")
-    _apply_sql("sql/schema/001_xetra_market.sql")
+    _apply_sql("sql/schema/001_xetra_loader.sql")
     _apply_sql("sql/schema/002_roles.sql")
     _apply_sql("sql/sync/001_xetra_loader_sync.sql")
     connection = connect_postgres(DSN)
     try:
         with connection.transaction():
-            connection.execute("TRUNCATE xetra_market.listings CASCADE")
+            connection.execute("TRUNCATE xetra_loader.listings CASCADE")
             connection.execute(
                 "DELETE FROM xetra_loader_sync.loader_runs WHERE dataset = 'eod_quotes'"
             )
@@ -59,7 +59,7 @@ def test_quote_sync_initial_replay_correction_and_new_date() -> None:
                 "DELETE FROM xetra_loader_sync.sync_state WHERE dataset = 'eod_quotes'"
             )
             connection.execute(
-                "INSERT INTO xetra_market.listings "
+                "INSERT INTO xetra_loader.listings "
                 "(isin, exchange, code, fetched_at_utc, published_at_utc) "
                 "VALUES ('DE0000000001', 'XETRA', 'AAA', now(), now())"
             )
@@ -98,7 +98,7 @@ def test_quote_sync_initial_replay_correction_and_new_date() -> None:
         assert extended.counters.inserted == 1
         assert extended.counters.updated == 0
         quote_count = connection.execute(
-            "SELECT count(*) FROM xetra_market.eod_quotes"
+            "SELECT count(*) FROM xetra_loader.eod_quotes"
         ).fetchone()
         assert quote_count == (2,)
     finally:

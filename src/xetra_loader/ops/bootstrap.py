@@ -502,7 +502,7 @@ class PostgresEodhdBootstrapRuntime:
 
     def _initialize_database(self) -> None:
         for relative in (
-            "sql/schema/001_xetra_market.sql",
+            "sql/schema/001_xetra_loader.sql",
             "sql/schema/002_roles.sql",
             "sql/sync/001_xetra_loader_sync.sql",
         ):
@@ -561,7 +561,7 @@ class PostgresEodhdBootstrapRuntime:
 
     def _count(self, table: str) -> int:
         row = self._connection.execute(
-            f'SELECT count(*) FROM xetra_market."{table}"'
+            f'SELECT count(*) FROM xetra_loader."{table}"'
         ).fetchone()
         if row is None:
             raise RuntimeError(f"missing count result for {table}")
@@ -569,13 +569,13 @@ class PostgresEodhdBootstrapRuntime:
 
     def _keys(self, table: str, columns: str) -> set[tuple[str, ...]]:
         rows = self._connection.execute(
-            f'SELECT {columns} FROM xetra_market."{table}"'
+            f'SELECT {columns} FROM xetra_loader."{table}"'
         ).fetchall()
         return {tuple(str(value) for value in row) for row in rows}
 
     def _date_bounds(self, table: str, column: str) -> tuple[date | None, date | None]:
         row = self._connection.execute(
-            f'SELECT min("{column}"), max("{column}") FROM xetra_market."{table}"'
+            f'SELECT min("{column}"), max("{column}") FROM xetra_loader."{table}"'
         ).fetchone()
         if row is None:
             raise RuntimeError(f"missing date-bound result for {table}")

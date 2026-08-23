@@ -1,8 +1,8 @@
 BEGIN;
 
-CREATE SCHEMA IF NOT EXISTS xetra_market;
+CREATE SCHEMA IF NOT EXISTS xetra_loader;
 
-CREATE TABLE IF NOT EXISTS xetra_market.listings (
+CREATE TABLE IF NOT EXISTS xetra_loader.listings (
     isin TEXT NOT NULL,
     exchange TEXT NOT NULL,
     code TEXT NOT NULL,
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS xetra_market.listings (
     CHECK (btrim(code) <> '')
 );
 
-CREATE TABLE IF NOT EXISTS xetra_market.eod_quotes (
+CREATE TABLE IF NOT EXISTS xetra_loader.eod_quotes (
     isin TEXT NOT NULL,
     exchange TEXT NOT NULL,
     code TEXT NOT NULL,
@@ -34,12 +34,12 @@ CREATE TABLE IF NOT EXISTS xetra_market.eod_quotes (
     published_at_utc TIMESTAMPTZ(6) NOT NULL,
     PRIMARY KEY (isin, exchange, code, trade_date),
     FOREIGN KEY (isin, exchange, code)
-        REFERENCES xetra_market.listings (isin, exchange, code),
+        REFERENCES xetra_loader.listings (isin, exchange, code),
     CHECK (timestamp_eod = (trade_date::timestamp AT TIME ZONE 'UTC')),
     CHECK (volume IS NULL OR volume >= 0)
 );
 
-CREATE TABLE IF NOT EXISTS xetra_market.dividends (
+CREATE TABLE IF NOT EXISTS xetra_loader.dividends (
     isin TEXT NOT NULL,
     exchange TEXT NOT NULL,
     code TEXT NOT NULL,
@@ -55,11 +55,11 @@ CREATE TABLE IF NOT EXISTS xetra_market.dividends (
     published_at_utc TIMESTAMPTZ(6) NOT NULL,
     PRIMARY KEY (isin, exchange, code, event_key),
     FOREIGN KEY (isin, exchange, code)
-        REFERENCES xetra_market.listings (isin, exchange, code),
+        REFERENCES xetra_loader.listings (isin, exchange, code),
     CHECK (event_key ~ '^[0-9a-f]{64}$')
 );
 
-CREATE TABLE IF NOT EXISTS xetra_market.splits (
+CREATE TABLE IF NOT EXISTS xetra_loader.splits (
     isin TEXT NOT NULL,
     exchange TEXT NOT NULL,
     code TEXT NOT NULL,
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS xetra_market.splits (
     published_at_utc TIMESTAMPTZ(6) NOT NULL,
     PRIMARY KEY (isin, exchange, code, event_key),
     FOREIGN KEY (isin, exchange, code)
-        REFERENCES xetra_market.listings (isin, exchange, code),
+        REFERENCES xetra_loader.listings (isin, exchange, code),
     CHECK (event_key ~ '^[0-9a-f]{64}$'),
     CHECK (btrim(split_ratio) <> '')
 );

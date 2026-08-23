@@ -41,7 +41,7 @@ def sync_splits(
         retracted = 0
         for key in gold.retracted_keys:
             cursor.execute(
-                "DELETE FROM xetra_market.splits "
+                "DELETE FROM xetra_loader.splits "
                 "WHERE isin = %s AND exchange = %s AND code = %s AND event_key = %s",
                 key,
             )
@@ -50,7 +50,7 @@ def sync_splits(
 
         for event in gold.rows:
             cursor.execute(
-                "SELECT event_date, split_ratio, split_factor FROM xetra_market.splits "
+                "SELECT event_date, split_ratio, split_factor FROM xetra_loader.splits "
                 "WHERE isin = %s AND exchange = %s AND code = %s AND event_key = %s",
                 event.key,
             )
@@ -61,7 +61,7 @@ def sync_splits(
             semantic = (event.event_date, event.split_ratio, event.split_factor)
             if existing is None:
                 cursor.execute(
-                    "INSERT INTO xetra_market.splits "
+                    "INSERT INTO xetra_loader.splits "
                     "(isin, exchange, code, event_key, event_date, split_ratio, split_factor, "
                     "fetched_at_utc, published_at_utc) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
@@ -70,7 +70,7 @@ def sync_splits(
                 inserted += 1
             elif existing != semantic:
                 cursor.execute(
-                    "UPDATE xetra_market.splits SET event_date = %s, split_ratio = %s, "
+                    "UPDATE xetra_loader.splits SET event_date = %s, split_ratio = %s, "
                     "split_factor = %s, fetched_at_utc = %s, published_at_utc = %s "
                     "WHERE isin = %s AND exchange = %s AND code = %s AND event_key = %s",
                     (*semantic, published_at, published_at, *event.key),

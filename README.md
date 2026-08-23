@@ -17,10 +17,10 @@ python -c "import xetra_loader; print(xetra_loader.__version__)"
 
 The repository-local `.venv/` is intentionally ignored and must never be committed.
 
-For an existing PostgreSQL installation, run `sql/migrations/001_rename_to_xetra_loader.sql`
-once with an administrative connection before starting the renamed loader. It preserves the
+For an existing PostgreSQL installation, run the migrations in `sql/migrations/` in order
+with an administrative connection before starting the renamed loader. They preserve the
 existing loader data while renaming the role to `xetra-loader` and the schemas to
-`xetra_market` and `xetra_loader_sync`.
+`xetra_loader` and `xetra_loader_sync`.
 
 ## Local secrets
 

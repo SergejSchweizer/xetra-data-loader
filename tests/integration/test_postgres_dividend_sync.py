@@ -41,7 +41,7 @@ def _event(value: str) -> DividendEvent:
 
 
 def _dividend_count(connection: Connection[Any]) -> tuple[int]:
-    row = connection.execute("SELECT count(*) FROM xetra_market.dividends").fetchone()
+    row = connection.execute("SELECT count(*) FROM xetra_loader.dividends").fetchone()
     assert row is not None
     return (int(row[0]),)
 
@@ -49,13 +49,13 @@ def _dividend_count(connection: Connection[Any]) -> tuple[int]:
 def test_dividend_sync_initial_replay_correction_and_retraction() -> None:
     if DSN is None:
         pytest.skip("XDL_TEST_POSTGRES_DSN is not configured")
-    _apply_sql("sql/schema/001_xetra_market.sql")
+    _apply_sql("sql/schema/001_xetra_loader.sql")
     _apply_sql("sql/schema/002_roles.sql")
     _apply_sql("sql/sync/001_xetra_loader_sync.sql")
     connection = connect_postgres(DSN)
     try:
         with connection.transaction():
-            connection.execute("TRUNCATE xetra_market.listings CASCADE")
+            connection.execute("TRUNCATE xetra_loader.listings CASCADE")
             connection.execute(
                 "DELETE FROM xetra_loader_sync.loader_runs WHERE dataset = 'dividends'"
             )
@@ -63,7 +63,7 @@ def test_dividend_sync_initial_replay_correction_and_retraction() -> None:
                 "DELETE FROM xetra_loader_sync.sync_state WHERE dataset = 'dividends'"
             )
             connection.execute(
-                "INSERT INTO xetra_market.listings "
+                "INSERT INTO xetra_loader.listings "
                 "(isin, exchange, code, fetched_at_utc, published_at_utc) "
                 "VALUES ('DE0000000001', 'XETRA', 'AAA', now(), now())"
             )

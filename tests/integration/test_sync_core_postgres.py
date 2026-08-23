@@ -26,7 +26,7 @@ def _apply_sql(path: str) -> None:
 def test_sync_transaction_noop_and_rollback_are_atomic() -> None:
     if DSN is None:
         pytest.skip("XDL_TEST_POSTGRES_DSN is not configured")
-    _apply_sql("sql/schema/001_xetra_market.sql")
+    _apply_sql("sql/schema/001_xetra_loader.sql")
     _apply_sql("sql/schema/002_roles.sql")
     _apply_sql("sql/sync/001_xetra_loader_sync.sql")
 
@@ -34,10 +34,10 @@ def test_sync_transaction_noop_and_rollback_are_atomic() -> None:
     try:
         with connection.transaction():
             connection.execute(
-                "CREATE TABLE IF NOT EXISTS xetra_market.sync_core_probe "
+                "CREATE TABLE IF NOT EXISTS xetra_loader.sync_core_probe "
                 "(id INTEGER PRIMARY KEY, value TEXT NOT NULL)"
             )
-            connection.execute("TRUNCATE xetra_market.sync_core_probe")
+            connection.execute("TRUNCATE xetra_loader.sync_core_probe")
             connection.execute(
                 "DELETE FROM xetra_loader_sync.loader_runs WHERE dataset = 'sync-core-probe'"
             )
@@ -47,7 +47,7 @@ def test_sync_transaction_noop_and_rollback_are_atomic() -> None:
 
         def insert_probe(cursor: Cursor[object]) -> SyncCounters:
             cursor.execute(
-                "INSERT INTO xetra_market.sync_core_probe (id, value) VALUES (1, 'a')"
+                "INSERT INTO xetra_loader.sync_core_probe (id, value) VALUES (1, 'a')"
             )
             return SyncCounters(inserted=1)
 
@@ -76,7 +76,7 @@ def test_sync_transaction_noop_and_rollback_are_atomic() -> None:
 
         def fail_after_mutation(cursor: Cursor[object]) -> SyncCounters:
             cursor.execute(
-                "UPDATE xetra_market.sync_core_probe SET value = 'broken' WHERE id = 1"
+                "UPDATE xetra_loader.sync_core_probe SET value = 'broken' WHERE id = 1"
             )
             raise RuntimeError("injected sync failure")
 
@@ -90,7 +90,7 @@ def test_sync_transaction_noop_and_rollback_are_atomic() -> None:
             )
 
         value = connection.execute(
-            "SELECT value FROM xetra_market.sync_core_probe WHERE id = 1"
+            "SELECT value FROM xetra_loader.sync_core_probe WHERE id = 1"
         ).fetchone()
         state = connection.execute(
             "SELECT semantic_fingerprint FROM xetra_loader_sync.sync_state "

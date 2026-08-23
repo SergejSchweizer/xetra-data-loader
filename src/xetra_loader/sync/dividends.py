@@ -51,7 +51,7 @@ def sync_dividends(
         retracted = 0
         for key in gold.retracted_keys:
             cursor.execute(
-                "DELETE FROM xetra_market.dividends "
+                "DELETE FROM xetra_loader.dividends "
                 "WHERE isin = %s AND exchange = %s AND code = %s AND event_key = %s",
                 key,
             )
@@ -61,7 +61,7 @@ def sync_dividends(
         for event in gold.rows:
             cursor.execute(
                 "SELECT event_date, declaration_date, record_date, payment_date, value, "
-                "currency, period FROM xetra_market.dividends "
+                "currency, period FROM xetra_loader.dividends "
                 "WHERE isin = %s AND exchange = %s AND code = %s AND event_key = %s",
                 event.key,
             )
@@ -77,7 +77,7 @@ def sync_dividends(
             )
             if existing is None:
                 cursor.execute(
-                    "INSERT INTO xetra_market.dividends "
+                    "INSERT INTO xetra_loader.dividends "
                     "(isin, exchange, code, event_key, event_date, declaration_date, record_date, "
                     "payment_date, value, currency, period, fetched_at_utc, published_at_utc) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
@@ -86,7 +86,7 @@ def sync_dividends(
                 inserted += 1
             elif existing != semantic:
                 cursor.execute(
-                    "UPDATE xetra_market.dividends SET event_date = %s, declaration_date = %s, "
+                    "UPDATE xetra_loader.dividends SET event_date = %s, declaration_date = %s, "
                     "record_date = %s, payment_date = %s, value = %s, currency = %s, period = %s, "
                     "fetched_at_utc = %s, published_at_utc = %s "
                     "WHERE isin = %s AND exchange = %s AND code = %s AND event_key = %s",
