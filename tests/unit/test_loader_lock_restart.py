@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from xetra_data_loader.pipeline.orchestrator import PipelineStageError, PipelineStages
-from xetra_data_loader.pipeline.restart import (
+from xetra_loader.pipeline.orchestrator import PipelineStageError, PipelineStages
+from xetra_loader.pipeline.restart import (
     ConcurrentLoaderRunError,
     LoaderLock,
     run_restartable_pipeline,
 )
-from xetra_data_loader.sync.core import JSONValue
+from xetra_loader.sync.core import JSONValue
 
 STAGE_NAMES = (
     "listings",

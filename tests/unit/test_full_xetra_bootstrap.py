@@ -3,17 +3,17 @@ from decimal import Decimal
 
 import pytest
 
-from xetra_data_loader.contracts.corporate_actions import DividendEvent, SplitEvent
-from xetra_data_loader.contracts.listings import ListingRecord
-from xetra_data_loader.contracts.quotes import QuoteRecord
-from xetra_data_loader.ops.bootstrap import (
+from xetra_loader.contracts.corporate_actions import DividendEvent, SplitEvent
+from xetra_loader.contracts.listings import ListingRecord
+from xetra_loader.contracts.quotes import QuoteRecord
+from xetra_loader.ops.bootstrap import (
     BootstrapVerification,
     DestructiveConfirmationRequired,
     FetchBatch,
     FetchMetrics,
     run_full_bootstrap,
 )
-from xetra_data_loader.sync.core import SyncCounters, SyncOutcome
+from xetra_loader.sync.core import SyncCounters, SyncOutcome
 
 
 class FixtureRuntime:

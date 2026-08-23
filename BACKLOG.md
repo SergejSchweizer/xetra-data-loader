@@ -4,7 +4,7 @@ Last reviewed: 2026-08-22
 
 ## 1. Status authority
 
-This file is the complete implementation authority for `SergejSchweizer/xetra-data-loader`.
+This file is the complete implementation authority for `SergejSchweizer/xetra-loader`.
 
 The former coarse loader plan `PR297`-`PR307` is superseded. It is replaced by repository-local work orders `XDL-PR001` through `XDL-PR033`, designed for multiple weak agents that must work independently with minimal merge conflicts.
 
@@ -21,11 +21,11 @@ The implementation gate was satisfied by XDL-PR000 in `origin/main`.
 
 ```text
 EODHD
-  -> xetra-data-loader
+  -> xetra-loader
        Bronze -> Silver -> Gold
        -> PostgreSQL 10.10.1.3:54321
-            portfell_market
-            portfell_loader_sync
+            xetra_market
+            xetra_loader_sync
                  |
                  | SELECT only as portfell_app
                  v
@@ -187,7 +187,7 @@ Safe parallel waves:
 
 ### PR001 — xdl-pr001-python-repository-baseline
 Branch `chore/xdl-pr001-python-repository-baseline`; commit scope `chore(xdl-pr001-python-repository-baseline): ...`; depends on PR000.
-Owned paths: `.python-version`, `.gitignore`, package metadata in `pyproject.toml`, minimal `src/xetra_data_loader/*`, test-root placeholders, README setup section.
+Owned paths: `.python-version`, `.gitignore`, package metadata in `pyproject.toml`, minimal `src/xetra_loader/*`, test-root placeholders, README setup section.
 Tasks: pin Python 3.14.7; create installable src layout; document creation/activation of `.venv`; ignore `.venv/`; create unit/integration roots.
 Acceptance: `.venv` reports exactly Python 3.14.7; package installs/imports; no `.venv` files tracked; no provider/DB/business implementation.
 
@@ -223,14 +223,14 @@ Acceptance: GitHub reports protection active; representative PR cannot merge bef
 
 ### PR007 — xdl-pr007-postgres-market-schema
 Branch `feat/xdl-pr007-postgres-market-schema`; commit scope `feat(xdl-pr007-postgres-market-schema): ...`; depends on PR006.
-Owned paths: `sql/schema/001_portfell_market.sql`, typed market DTOs, schema tests.
-Tasks: create `portfell_market`; tables `listings`, `eod_quotes`, `dividends`, `splits`; frozen keys; exact `TIMESTAMPTZ(6)`; `trade_date DATE`; reject naive datetime DTOs.
+Owned paths: `sql/schema/001_xetra_market.sql`, typed market DTOs, schema tests.
+Tasks: create `xetra_market`; tables `listings`, `eod_quotes`, `dividends`, `splits`; frozen keys; exact `TIMESTAMPTZ(6)`; `trade_date DATE`; reject naive datetime DTOs.
 Acceptance: DDL recreates on empty PostgreSQL; introspection/types/keys exact; duplicate keys and naive datetimes fail.
 
 ### PR008 — xdl-pr008-postgres-role-grants
 Branch `feat/xdl-pr008-postgres-role-grants`; commit scope `feat(xdl-pr008-postgres-role-grants): ...`; depends on PR007.
 Owned paths: role SQL + role integration test.
-Tasks: `xetra-data-loader` writer; `portfell_app` SELECT-only market schema; deny app DML/DDL and loader-sync access.
+Tasks: `xetra-loader` writer; `portfell_app` SELECT-only market schema; deny app DML/DDL and loader-sync access.
 Acceptance: required writer DML works; all forbidden app operations fail.
 
 ### PR009 — xdl-pr009-medallion-core-contract
@@ -314,7 +314,7 @@ Acceptance: direct load-compatible; invalid/duplicate event fails; exact expecte
 ### PR022 — xdl-pr022-postgres-sync-core
 Branch `feat/xdl-pr022-postgres-sync-core`; commit scope `feat(xdl-pr022-postgres-sync-core): ...`; depends on PR008+PR009.
 Owned paths: loader-sync schema, generic sync core/state + tests.
-Tasks: `portfell_loader_sync` state/run tables with `TIMESTAMPTZ(6)`; semantic fingerprint; transaction coupling data mutation and state advance; generic mutation counters; rollback proof.
+Tasks: `xetra_loader_sync` state/run tables with `TIMESTAMPTZ(6)`; semantic fingerprint; transaction coupling data mutation and state advance; generic mutation counters; rollback proof.
 Acceptance: injected failure changes neither serving data nor sync state; run metadata excluded from fingerprint; no entity-specific sync code.
 
 ### PR023 — xdl-pr023-postgres-listing-sync
@@ -356,8 +356,8 @@ Acceptance: second concurrent run denied; failed run recovers; restart produces 
 ### PR029 — xdl-pr029-sunday-1100-schedule
 Branch `feat/xdl-pr029-sunday-1100-schedule`; commit scope `feat(xdl-pr029-sunday-1100-schedule): ...`; depends on PR027.
 Owned paths: cron/scheduler deployment config + tests.
-Tasks: literal `CRON_TZ=Europe/Vienna`; literal `0 12 * * 0`; invoke the full guarded bootstrap; DST tests.
-Acceptance: expression exact and remains Sunday 12:00 Vienna before/after DST; no pipeline business code changed.
+Tasks: literal `CRON_TZ=Europe/Vienna`; literal `0 8 * * 0`; invoke the full guarded bootstrap; DST tests.
+Acceptance: expression exact and remains Sunday 08:00 Vienna before/after DST; no pipeline business code changed.
 
 ### PR030 — xdl-pr030-destructive-reset-guard
 Branch `feat/xdl-pr030-destructive-reset-guard`; commit scope `feat(xdl-pr030-destructive-reset-guard): ...`; depends on PR009+PR022.
@@ -384,7 +384,7 @@ Atomic outcome: perform the real complete initial XETRA synchronization to Postg
 
 Owned paths:
 
-- `src/xetra_data_loader/ops/verify_postgres_sync.py` or equivalent read-only verification command;
+- `src/xetra_loader/ops/verify_postgres_sync.py` or equivalent read-only verification command;
 - focused verification integration tests;
 - `docs/acceptance/production-postgres-full-sync.md`;
 - sanitized machine-readable acceptance report, e.g. `artifacts/acceptance/postgres-full-sync.json`;
@@ -394,7 +394,7 @@ Tasks:
 
 1. Verify runtime target host/port resolves to exactly `10.10.1.3:54321`; credentials remain secret/env-only.
 2. Execute the confirmed full bootstrap/sync using the production loader path: full current XETRA non-empty-ISIN universe plus full available quote, dividend, and split histories.
-3. Require a successful committed loader run in `portfell_loader_sync`; partial or failed runs cannot count as completion.
+3. Require a successful committed loader run in `xetra_loader_sync`; partial or failed runs cannot count as completion.
 4. After the committed sync, run an independent read-only verification against PostgreSQL rather than trusting only writer counters.
 5. For `listings`, `eod_quotes`, `dividends`, and `splits`, compare Gold and PostgreSQL row counts and require exact equality.
 6. Compare business keys in both directions (Gold minus PostgreSQL and PostgreSQL minus Gold) and require zero missing/extra keys.
@@ -403,7 +403,7 @@ Tasks:
 9. Assert zero orphan quote/dividend/split rows relative to `(isin,exchange,code)` listings.
 10. Compare relevant minimum/maximum business-date/event-date bounds between Gold and PostgreSQL.
 11. Introspect every PostgreSQL timestamp column and require exactly `TIMESTAMPTZ(6)`; require DB session timezone `UTC`.
-12. Verify `portfell_app` can SELECT all four serving tables and cannot INSERT/UPDATE/DELETE/DDL or access `portfell_loader_sync`.
+12. Verify `portfell_app` can SELECT all four serving tables and cannot INSERT/UPDATE/DELETE/DDL or access `xetra_loader_sync`.
 13. Immediately rerun against unchanged source/Gold state and require exactly zero semantic inserts, updates, retractions, or deletes across all four serving tables.
 14. Emit a sanitized acceptance report containing target host/port, run ID, source/Gold/PostgreSQL row counts, key-difference counts, duplicate/orphan counts, date bounds, semantic fingerprints, timestamp/UTC checks, role checks, and no-op replay mutation counters. Never include passwords, tokens, full DSNs, or raw provider payloads.
 15. Fail closed: any non-zero mismatch, missing table, unexpected row, duplicate, orphan, fingerprint mismatch, timestamp mismatch, privilege violation, failed run, or non-zero unchanged-replay mutation prevents completion.
@@ -430,7 +430,7 @@ Portfell may begin read-contract implementation after XDL-PR007 freezes consumer
 
 Portfell's final cross-repository serving/cutover gate is blocked until **XDL-PR033 is merged and its real target-PostgreSQL full-sync acceptance report is PASS**. XDL-PR032 alone is fixture/production-like evidence and is not sufficient for final Portfell cutover.
 
-Portfell may consume only the PostgreSQL contract, read-only-role contract, and sanitized acceptance artifacts. It must not import `xetra-data-loader`, call EODHD, read medallion files, or mutate loader schemas.
+Portfell may consume only the PostgreSQL contract, read-only-role contract, and sanitized acceptance artifacts. It must not import `xetra-loader`, call EODHD, read medallion files, or mutate loader schemas.
 
 ## 8. Mapping from superseded coarse loader plan
 
@@ -452,7 +452,7 @@ Any old PR297-PR307 implementation branch is superseded and must not be merged a
 
 ## 9. Completion gate
 
-`xetra-data-loader` is complete only when **XDL-PR001 through XDL-PR033** are merged from clean protected `main` and all conditions below hold:
+`xetra-loader` is complete only when **XDL-PR001 through XDL-PR033** are merged from clean protected `main` and all conditions below hold:
 
 - Python 3.14.7 `.venv` is reproducible and untracked;
 - push/merge gates parallelize lint/type/unit/integration and policy validation enforces Conventional Commits plus exact work-order naming;
@@ -465,7 +465,7 @@ Any old PR297-PR307 implementation branch is superseded and must not be merged a
 - unchanged replay is zero-mutation;
 - timestamp contract is exactly `TIMESTAMPTZ(6)` + UTC;
 - `portfell_app` is SELECT-only;
-- Sunday schedule is exactly 12:00 Europe/Vienna;
+- Sunday schedule is exactly 08:00 Europe/Vienna;
 - destructive reset is explicit and scoped;
 - XDL-PR032 production-like E2E artifact is green;
 - **a complete real synchronization has been executed against PostgreSQL `10.10.1.3:54321`;**

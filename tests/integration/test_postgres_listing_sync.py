@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from xetra_data_loader.contracts.listings import ListingRecord
-from xetra_data_loader.gold.listings import build_listing_gold
-from xetra_data_loader.sync import connect_postgres
-from xetra_data_loader.sync.listings import sync_listings
+from xetra_loader.contracts.listings import ListingRecord
+from xetra_loader.gold.listings import build_listing_gold
+from xetra_loader.sync import connect_postgres
+from xetra_loader.sync.listings import sync_listings
 
 DSN = os.getenv("XDL_TEST_POSTGRES_DSN")
 pytestmark = pytest.mark.integration
@@ -29,18 +29,18 @@ def _apply_sql(path: str) -> None:
 def test_listing_sync_initial_replay_and_one_update() -> None:
     if DSN is None:
         pytest.skip("XDL_TEST_POSTGRES_DSN is not configured")
-    _apply_sql("sql/schema/001_portfell_market.sql")
+    _apply_sql("sql/schema/001_xetra_market.sql")
     _apply_sql("sql/schema/002_roles.sql")
-    _apply_sql("sql/sync/001_portfell_loader_sync.sql")
+    _apply_sql("sql/sync/001_xetra_loader_sync.sql")
     connection = connect_postgres(DSN)
     try:
         with connection.transaction():
-            connection.execute("TRUNCATE portfell_market.listings CASCADE")
+            connection.execute("TRUNCATE xetra_market.listings CASCADE")
             connection.execute(
-                "DELETE FROM portfell_loader_sync.loader_runs WHERE dataset = 'listings'"
+                "DELETE FROM xetra_loader_sync.loader_runs WHERE dataset = 'listings'"
             )
             connection.execute(
-                "DELETE FROM portfell_loader_sync.sync_state WHERE dataset = 'listings'"
+                "DELETE FROM xetra_loader_sync.sync_state WHERE dataset = 'listings'"
             )
 
         published = datetime(2026, 8, 22, 20, 0, tzinfo=UTC)
@@ -74,7 +74,7 @@ def test_listing_sync_initial_replay_and_one_update() -> None:
         )
         assert changed.counters.updated == 1
         assert connection.execute(
-            "SELECT name FROM portfell_market.listings WHERE code = 'AAA'"
+            "SELECT name FROM xetra_market.listings WHERE code = 'AAA'"
         ).fetchone() == ("Changed",)
     finally:
         connection.close()

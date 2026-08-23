@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from psycopg import Cursor
 
-from xetra_data_loader.sync import SyncCounters, connect_postgres, run_sync
+from xetra_loader.sync import SyncCounters, connect_postgres, run_sync
 
 DSN = os.getenv("XDL_TEST_POSTGRES_DSN")
 pytestmark = pytest.mark.integration
@@ -26,28 +26,28 @@ def _apply_sql(path: str) -> None:
 def test_sync_transaction_noop_and_rollback_are_atomic() -> None:
     if DSN is None:
         pytest.skip("XDL_TEST_POSTGRES_DSN is not configured")
-    _apply_sql("sql/schema/001_portfell_market.sql")
+    _apply_sql("sql/schema/001_xetra_market.sql")
     _apply_sql("sql/schema/002_roles.sql")
-    _apply_sql("sql/sync/001_portfell_loader_sync.sql")
+    _apply_sql("sql/sync/001_xetra_loader_sync.sql")
 
     connection = connect_postgres(DSN)
     try:
         with connection.transaction():
             connection.execute(
-                "CREATE TABLE IF NOT EXISTS portfell_market.sync_core_probe "
+                "CREATE TABLE IF NOT EXISTS xetra_market.sync_core_probe "
                 "(id INTEGER PRIMARY KEY, value TEXT NOT NULL)"
             )
-            connection.execute("TRUNCATE portfell_market.sync_core_probe")
+            connection.execute("TRUNCATE xetra_market.sync_core_probe")
             connection.execute(
-                "DELETE FROM portfell_loader_sync.loader_runs WHERE dataset = 'sync-core-probe'"
+                "DELETE FROM xetra_loader_sync.loader_runs WHERE dataset = 'sync-core-probe'"
             )
             connection.execute(
-                "DELETE FROM portfell_loader_sync.sync_state WHERE dataset = 'sync-core-probe'"
+                "DELETE FROM xetra_loader_sync.sync_state WHERE dataset = 'sync-core-probe'"
             )
 
         def insert_probe(cursor: Cursor[object]) -> SyncCounters:
             cursor.execute(
-                "INSERT INTO portfell_market.sync_core_probe (id, value) VALUES (1, 'a')"
+                "INSERT INTO xetra_market.sync_core_probe (id, value) VALUES (1, 'a')"
             )
             return SyncCounters(inserted=1)
 
@@ -76,7 +76,7 @@ def test_sync_transaction_noop_and_rollback_are_atomic() -> None:
 
         def fail_after_mutation(cursor: Cursor[object]) -> SyncCounters:
             cursor.execute(
-                "UPDATE portfell_market.sync_core_probe SET value = 'broken' WHERE id = 1"
+                "UPDATE xetra_market.sync_core_probe SET value = 'broken' WHERE id = 1"
             )
             raise RuntimeError("injected sync failure")
 
@@ -90,14 +90,14 @@ def test_sync_transaction_noop_and_rollback_are_atomic() -> None:
             )
 
         value = connection.execute(
-            "SELECT value FROM portfell_market.sync_core_probe WHERE id = 1"
+            "SELECT value FROM xetra_market.sync_core_probe WHERE id = 1"
         ).fetchone()
         state = connection.execute(
-            "SELECT semantic_fingerprint FROM portfell_loader_sync.sync_state "
+            "SELECT semantic_fingerprint FROM xetra_loader_sync.sync_state "
             "WHERE dataset = 'sync-core-probe'"
         ).fetchone()
         failed_run = connection.execute(
-            "SELECT count(*) FROM portfell_loader_sync.loader_runs "
+            "SELECT count(*) FROM xetra_loader_sync.loader_runs "
             "WHERE run_id = 'sync-core-failure'"
         ).fetchone()
         assert value == ("a",)

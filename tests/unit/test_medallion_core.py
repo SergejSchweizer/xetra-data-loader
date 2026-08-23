@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from xetra_data_loader.medallion import Layer, Manifest, MedallionLayout
+from xetra_loader.medallion import Layer, Manifest, MedallionLayout
 
 
 def test_layout_resolves_each_layer() -> None:

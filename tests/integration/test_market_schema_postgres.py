@@ -21,15 +21,15 @@ def _psql(*arguments: str, input_text: str | None = None) -> subprocess.Complete
 
 
 def test_market_schema_recreates_and_introspects_exact_types() -> None:
-    _psql("-c", "DROP SCHEMA IF EXISTS portfell_market CASCADE")
-    schema_sql = Path("sql/schema/001_portfell_market.sql").read_text(encoding="utf-8")
+    _psql("-c", "DROP SCHEMA IF EXISTS xetra_market CASCADE")
+    schema_sql = Path("sql/schema/001_xetra_market.sql").read_text(encoding="utf-8")
     _psql(input_text=schema_sql)
     result = _psql(
         "-At",
         "-c",
         "SELECT table_name || ':' || column_name || ':' || data_type || ':' || "
         "COALESCE(datetime_precision::text, '') FROM information_schema.columns "
-        "WHERE table_schema='portfell_market' ORDER BY table_name, ordinal_position",
+        "WHERE table_schema='xetra_market' ORDER BY table_name, ordinal_position",
     )
     rows = result.stdout.splitlines()
     assert any(row.startswith("eod_quotes:trade_date:date:") for row in rows)

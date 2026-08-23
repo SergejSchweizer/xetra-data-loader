@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from xetra_data_loader.config import (
+from xetra_loader.config import (
     resolve_eodhd_token,
     resolve_medallion_root,
     resolve_postgres_dsn,

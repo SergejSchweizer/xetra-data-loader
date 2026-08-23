@@ -1,9 +1,9 @@
 from collections.abc import Mapping
 from datetime import date
 
-from xetra_data_loader.contracts.corporate_actions import ActionStatus
-from xetra_data_loader.contracts.listings import ListingRecord
-from xetra_data_loader.ingestion.dividends import JSONValue, ingest_dividends
+from xetra_loader.contracts.corporate_actions import ActionStatus
+from xetra_loader.contracts.listings import ListingRecord
+from xetra_loader.ingestion.dividends import JSONValue, ingest_dividends
 
 
 class FixtureTransport:

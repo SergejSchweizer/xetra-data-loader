@@ -3,7 +3,7 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
-name = "xetra-data-loader"
+name = "xetra-loader"
 version = "0.1.0"
 description = "Deterministic XETRA market-data loader with Bronze/Silver/Gold medallion storage and PostgreSQL publication."
 readme = "README.md"
@@ -16,9 +16,9 @@ dependencies = [
 ]
 
 [project.scripts]
-xdl-weekly = "xetra_data_loader.pipeline.orchestrator:main"
-xdl-bootstrap = "xetra_data_loader.ops.bootstrap:main"
-xdl-verify-production-sync = "xetra_data_loader.ops.verify_postgres_sync:main"
+xdl-weekly = "xetra_loader.pipeline.orchestrator:main"
+xdl-bootstrap = "xetra_loader.ops.bootstrap:main"
+xdl-verify-production-sync = "xetra_loader.ops.verify_postgres_sync:main"
 
 [project.optional-dependencies]
 dev = [
@@ -30,7 +30,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/xetra_data_loader"]
+packages = ["src/xetra_loader"]
 
 [tool.ruff]
 target-version = "py314"
@@ -44,7 +44,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 python_version = "3.14"
 strict = true
 mypy_path = "src"
-packages = ["xetra_data_loader"]
+packages = ["xetra_loader"]
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"

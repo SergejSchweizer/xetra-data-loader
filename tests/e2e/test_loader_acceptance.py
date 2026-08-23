@@ -6,27 +6,27 @@ from pathlib import Path
 
 import pytest
 
-from xetra_data_loader.contracts.corporate_actions import (
+from xetra_loader.contracts.corporate_actions import (
     DividendEvent,
     SplitEvent,
     retract_dividend,
     retract_split,
 )
-from xetra_data_loader.contracts.listings import ListingRecord
-from xetra_data_loader.contracts.quotes import QuoteRecord
-from xetra_data_loader.gold.dividends import build_dividend_gold
-from xetra_data_loader.gold.listings import build_listing_gold
-from xetra_data_loader.gold.quotes import build_quote_gold
-from xetra_data_loader.gold.splits import build_split_gold
-from xetra_data_loader.ops.acceptance import LoaderAcceptanceReport, write_acceptance_report
-from xetra_data_loader.ops.bootstrap import (
+from xetra_loader.contracts.listings import ListingRecord
+from xetra_loader.contracts.quotes import QuoteRecord
+from xetra_loader.gold.dividends import build_dividend_gold
+from xetra_loader.gold.listings import build_listing_gold
+from xetra_loader.gold.quotes import build_quote_gold
+from xetra_loader.gold.splits import build_split_gold
+from xetra_loader.ops.acceptance import LoaderAcceptanceReport, write_acceptance_report
+from xetra_loader.ops.bootstrap import (
     BootstrapVerification,
     FetchBatch,
     FetchMetrics,
     run_full_bootstrap,
 )
-from xetra_data_loader.pipeline.restart import ConcurrentLoaderRunError, LoaderLock
-from xetra_data_loader.sync.core import SyncCounters, SyncOutcome
+from xetra_loader.pipeline.restart import ConcurrentLoaderRunError, LoaderLock
+from xetra_loader.sync.core import SyncCounters, SyncOutcome
 
 pytestmark = pytest.mark.integration
 
@@ -298,8 +298,8 @@ def test_complete_loader_acceptance_matrix(tmp_path: Path) -> None:
 
 
 def _timestamp_contract_is_exact() -> bool:
-    market = Path("sql/schema/001_portfell_market.sql").read_text(encoding="utf-8")
-    sync = Path("sql/sync/001_portfell_loader_sync.sql").read_text(encoding="utf-8")
+    market = Path("sql/schema/001_xetra_market.sql").read_text(encoding="utf-8")
+    sync = Path("sql/sync/001_xetra_loader_sync.sql").read_text(encoding="utf-8")
     required = (
         "fetched_at_utc TIMESTAMPTZ(6) NOT NULL",
         "published_at_utc TIMESTAMPTZ(6) NOT NULL",
@@ -318,9 +318,9 @@ def _timestamp_contract_is_exact() -> bool:
 def _app_role_is_select_only() -> bool:
     roles = Path("sql/schema/002_roles.sql").read_text(encoding="utf-8")
     return (
-        "GRANT SELECT ON ALL TABLES IN SCHEMA portfell_market TO portfell_app" in roles
+        "GRANT SELECT ON ALL TABLES IN SCHEMA xetra_market TO portfell_app" in roles
         and "REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER" in roles
-        and "REVOKE ALL ON SCHEMA portfell_loader_sync FROM portfell_app" in roles
+        and "REVOKE ALL ON SCHEMA xetra_loader_sync FROM portfell_app" in roles
     )
 
 
@@ -341,13 +341,13 @@ def _lock_contract_holds(tmp_path: Path) -> bool:
 
 
 def _scheduler_contract() -> bool:
-    lines = Path("deploy/cron/xetra-data-loader.cron").read_text(encoding="utf-8").splitlines()
-    return lines[0] == "CRON_TZ=Europe/Vienna" and lines[1].startswith("0 12 * * 0 ")
+    lines = Path("deploy/cron/xetra-loader.cron").read_text(encoding="utf-8").splitlines()
+    return lines[0] == "CRON_TZ=Europe/Vienna" and lines[1].startswith("0 8 * * 0 ")
 
 
 def _count_portfell_imports() -> int:
     pattern = re.compile(r"^\s*(?:from|import)\s+portfell\b", re.MULTILINE)
     return sum(
         len(pattern.findall(path.read_text(encoding="utf-8")))
-        for path in Path("src/xetra_data_loader").rglob("*.py")
+        for path in Path("src/xetra_loader").rglob("*.py")
     )

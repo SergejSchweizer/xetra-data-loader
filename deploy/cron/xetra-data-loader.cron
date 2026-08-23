@@ -1,2 +1,0 @@
-CRON_TZ=Europe/Vienna
-0 12 * * 0 cd /home/dev_xetra/xetra-data-loader && /usr/bin/flock -n .data/medallion/bootstrap.lock .venv/bin/xdl-bootstrap --confirm-destructive-reset >> artifacts/cron/xdl-bootstrap.log 2>&1

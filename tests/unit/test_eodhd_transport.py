@@ -4,7 +4,7 @@ from urllib.request import Request
 
 import pytest
 
-from xetra_data_loader.eodhd import EodhdTransport, RetryPolicy, scrub_url
+from xetra_loader.eodhd import EodhdTransport, RetryPolicy, scrub_url
 
 
 class FakeResponse:

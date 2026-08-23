@@ -6,21 +6,21 @@ from pathlib import Path
 
 import pytest
 
-from xetra_data_loader.contracts.corporate_actions import DividendEvent, SplitEvent
-from xetra_data_loader.contracts.listings import ListingRecord
-from xetra_data_loader.contracts.quotes import QuoteRecord
-from xetra_data_loader.gold.dividends import build_dividend_gold
-from xetra_data_loader.gold.listings import build_listing_gold
-from xetra_data_loader.gold.quotes import build_quote_gold
-from xetra_data_loader.gold.splits import build_split_gold
-from xetra_data_loader.medallion.core import (
+from xetra_loader.contracts.corporate_actions import DividendEvent, SplitEvent
+from xetra_loader.contracts.listings import ListingRecord
+from xetra_loader.contracts.quotes import QuoteRecord
+from xetra_loader.gold.dividends import build_dividend_gold
+from xetra_loader.gold.listings import build_listing_gold
+from xetra_loader.gold.quotes import build_quote_gold
+from xetra_loader.gold.splits import build_split_gold
+from xetra_loader.medallion.core import (
     JSONValue,
     Layer,
     Manifest,
     MedallionLayout,
     canonical_json,
 )
-from xetra_data_loader.ops.verify_postgres_sync import (
+from xetra_loader.ops.verify_postgres_sync import (
     DATASETS,
     DatasetVerification,
     ProductionAcceptanceReport,
@@ -170,7 +170,7 @@ def _passing_report() -> ProductionAcceptanceReport:
         orphan_counts={"eod_quotes": 0, "dividends": 0, "splits": 0},
         timestamps=TimestampVerification(
             session_timezone="UTC",
-            checked_columns=("portfell_market.listings.fetched_at_utc",),
+            checked_columns=("xetra_market.listings.fetched_at_utc",),
             invalid_columns=(),
             missing_columns=(),
         ),

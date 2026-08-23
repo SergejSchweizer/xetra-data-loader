@@ -1,7 +1,7 @@
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from xetra_data_loader.contracts.corporate_actions import (
+from xetra_loader.contracts.corporate_actions import (
     ActionStatus,
     CorporateActionRunMetadata,
     DividendEvent,

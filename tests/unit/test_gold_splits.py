@@ -3,8 +3,8 @@ from decimal import Decimal
 
 import pytest
 
-from xetra_data_loader.contracts.corporate_actions import SplitEvent, retract_split
-from xetra_data_loader.gold.splits import build_split_gold
+from xetra_loader.contracts.corporate_actions import SplitEvent, retract_split
+from xetra_loader.gold.splits import build_split_gold
 
 
 def _event(ratio: str = "2:1") -> SplitEvent:

@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 
-from xetra_data_loader.ingestion.listings import JSONValue, ingest_xetra_listings
+from xetra_loader.ingestion.listings import JSONValue, ingest_xetra_listings
 
 
 class FixtureTransport:

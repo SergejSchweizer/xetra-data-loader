@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from xetra_data_loader.sync import SyncCounters, semantic_fingerprint
+from xetra_loader.sync import SyncCounters, semantic_fingerprint
 
 
 def test_semantic_fingerprint_is_order_independent() -> None:

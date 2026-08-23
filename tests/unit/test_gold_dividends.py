@@ -3,8 +3,8 @@ from decimal import Decimal
 
 import pytest
 
-from xetra_data_loader.contracts.corporate_actions import DividendEvent, retract_dividend
-from xetra_data_loader.gold.dividends import build_dividend_gold
+from xetra_loader.contracts.corporate_actions import DividendEvent, retract_dividend
+from xetra_loader.gold.dividends import build_dividend_gold
 
 
 def _event(value: str = "1.25") -> DividendEvent:

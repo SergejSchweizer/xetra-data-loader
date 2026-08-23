@@ -3,8 +3,8 @@ from decimal import Decimal
 
 import pytest
 
-from xetra_data_loader.contracts.quotes import QuoteRecord
-from xetra_data_loader.gold.quotes import build_quote_gold
+from xetra_loader.contracts.quotes import QuoteRecord
+from xetra_loader.gold.quotes import build_quote_gold
 
 
 def _quote(day: int, close: str = "10") -> QuoteRecord:

@@ -2,12 +2,12 @@ from collections.abc import Callable
 
 import pytest
 
-from xetra_data_loader.pipeline.orchestrator import (
+from xetra_loader.pipeline.orchestrator import (
     PipelineStageError,
     PipelineStages,
     run_weekly_pipeline,
 )
-from xetra_data_loader.sync.core import JSONValue
+from xetra_loader.sync.core import JSONValue
 
 EXPECTED_ORDER = [
     "listings",

@@ -1,8 +1,8 @@
 from collections.abc import Mapping
 from datetime import UTC, date
 
-from xetra_data_loader.contracts.listings import ListingRecord
-from xetra_data_loader.ingestion.quotes import JSONValue, ingest_quotes
+from xetra_loader.contracts.listings import ListingRecord
+from xetra_loader.ingestion.quotes import JSONValue, ingest_quotes
 
 
 class FixtureTransport:

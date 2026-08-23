@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 
-from xetra_data_loader.market import DividendRow, ListingRow, QuoteRow
+from xetra_loader.market import DividendRow, ListingRow, QuoteRow
 
 UTC_NOW = datetime(2026, 8, 22, 20, 0, tzinfo=UTC)
 

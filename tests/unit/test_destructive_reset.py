@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from xetra_data_loader.ops.reset import build_reset_plan, execute_reset, main
+from xetra_loader.ops.reset import build_reset_plan, execute_reset, main
 
 
 class _Context:
@@ -35,7 +35,7 @@ class FakeConnection:
 
 def test_plan_contains_only_loader_owned_scope(tmp_path: Path) -> None:
     plan = build_reset_plan(tmp_path)
-    assert plan.schemas == ("portfell_loader_sync", "portfell_market")
+    assert plan.schemas == ("xetra_loader_sync", "xetra_market")
     assert plan.medallion_paths == (
         tmp_path.resolve() / "bronze",
         tmp_path.resolve() / "silver",
@@ -81,8 +81,8 @@ def test_confirmed_reset_deletes_owned_paths_and_leaves_unrelated_path(tmp_path:
     assert (unrelated / "data.txt").read_text(encoding="utf-8") == "untouched"
     assert connection.cursor_value.statements == [
         "SET LOCAL TIME ZONE 'UTC'",
-        'DROP SCHEMA IF EXISTS "portfell_loader_sync" CASCADE',
-        'DROP SCHEMA IF EXISTS "portfell_market" CASCADE',
+        'DROP SCHEMA IF EXISTS "xetra_loader_sync" CASCADE',
+        'DROP SCHEMA IF EXISTS "xetra_market" CASCADE',
     ]
 
 

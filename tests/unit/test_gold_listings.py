@@ -1,7 +1,7 @@
 import pytest
 
-from xetra_data_loader.contracts.listings import ListingRecord
-from xetra_data_loader.gold.listings import build_listing_gold
+from xetra_loader.contracts.listings import ListingRecord
+from xetra_loader.gold.listings import build_listing_gold
 
 
 def test_gold_listing_rows_are_deterministic_and_load_compatible() -> None:

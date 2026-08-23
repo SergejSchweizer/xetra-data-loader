@@ -1,4 +1,4 @@
-from xetra_data_loader.contracts.listings import (
+from xetra_loader.contracts.listings import (
     deserialize_listings,
     normalize_listings,
     serialize_listings,

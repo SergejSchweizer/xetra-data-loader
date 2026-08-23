@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 
-from xetra_data_loader.contracts.quotes import (
+from xetra_loader.contracts.quotes import (
     QuoteRecord,
     QuoteRunMetadata,
     overlap_start,

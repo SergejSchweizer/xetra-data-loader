@@ -8,10 +8,10 @@ from typing import Any
 import pytest
 from psycopg import Connection
 
-from xetra_data_loader.contracts.corporate_actions import DividendEvent, retract_dividend
-from xetra_data_loader.gold.dividends import build_dividend_gold
-from xetra_data_loader.sync import connect_postgres
-from xetra_data_loader.sync.dividends import sync_dividends
+from xetra_loader.contracts.corporate_actions import DividendEvent, retract_dividend
+from xetra_loader.gold.dividends import build_dividend_gold
+from xetra_loader.sync import connect_postgres
+from xetra_loader.sync.dividends import sync_dividends
 
 DSN = os.getenv("XDL_TEST_POSTGRES_DSN")
 pytestmark = pytest.mark.integration
@@ -41,7 +41,7 @@ def _event(value: str) -> DividendEvent:
 
 
 def _dividend_count(connection: Connection[Any]) -> tuple[int]:
-    row = connection.execute("SELECT count(*) FROM portfell_market.dividends").fetchone()
+    row = connection.execute("SELECT count(*) FROM xetra_market.dividends").fetchone()
     assert row is not None
     return (int(row[0]),)
 
@@ -49,21 +49,21 @@ def _dividend_count(connection: Connection[Any]) -> tuple[int]:
 def test_dividend_sync_initial_replay_correction_and_retraction() -> None:
     if DSN is None:
         pytest.skip("XDL_TEST_POSTGRES_DSN is not configured")
-    _apply_sql("sql/schema/001_portfell_market.sql")
+    _apply_sql("sql/schema/001_xetra_market.sql")
     _apply_sql("sql/schema/002_roles.sql")
-    _apply_sql("sql/sync/001_portfell_loader_sync.sql")
+    _apply_sql("sql/sync/001_xetra_loader_sync.sql")
     connection = connect_postgres(DSN)
     try:
         with connection.transaction():
-            connection.execute("TRUNCATE portfell_market.listings CASCADE")
+            connection.execute("TRUNCATE xetra_market.listings CASCADE")
             connection.execute(
-                "DELETE FROM portfell_loader_sync.loader_runs WHERE dataset = 'dividends'"
+                "DELETE FROM xetra_loader_sync.loader_runs WHERE dataset = 'dividends'"
             )
             connection.execute(
-                "DELETE FROM portfell_loader_sync.sync_state WHERE dataset = 'dividends'"
+                "DELETE FROM xetra_loader_sync.sync_state WHERE dataset = 'dividends'"
             )
             connection.execute(
-                "INSERT INTO portfell_market.listings "
+                "INSERT INTO xetra_market.listings "
                 "(isin, exchange, code, fetched_at_utc, published_at_utc) "
                 "VALUES ('DE0000000001', 'XETRA', 'AAA', now(), now())"
             )

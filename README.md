@@ -1,4 +1,4 @@
-# xetra-data-loader
+# xetra-loader
 
 Deterministic XETRA market-data loader. The repository will own EODHD access, Bronze/Silver/Gold datasets, PostgreSQL publication, and the scheduled loader lifecycle defined in `BACKLOG.md`.
 
@@ -12,10 +12,15 @@ source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
 python --version           # must report Python 3.14.7
 python -m pip install --upgrade pip
 python -m pip install -e .
-python -c "import xetra_data_loader; print(xetra_data_loader.__version__)"
+python -c "import xetra_loader; print(xetra_loader.__version__)"
 ```
 
 The repository-local `.venv/` is intentionally ignored and must never be committed.
+
+For an existing PostgreSQL installation, run `sql/migrations/001_rename_to_xetra_loader.sql`
+once with an administrative connection before starting the renamed loader. It preserves the
+existing loader data while renaming the role to `xetra-loader` and the schemas to
+`xetra_market` and `xetra_loader_sync`.
 
 ## Local secrets
 
