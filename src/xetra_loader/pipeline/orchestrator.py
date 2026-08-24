@@ -14,6 +14,7 @@ from xetra_loader.sync.core import JSONValue
 
 type StageDetails = Mapping[str, JSONValue] | None
 type StageCallable = Callable[[], StageDetails]
+type StageRehydrator = Callable[[Mapping[str, Mapping[str, JSONValue]]], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +31,7 @@ class PipelineStages:
     postgres_dividends_sync: StageCallable
     postgres_splits_sync: StageCallable
     verification: StageCallable
+    rehydrate: StageRehydrator | None = None
 
 
 @dataclass(frozen=True, slots=True)

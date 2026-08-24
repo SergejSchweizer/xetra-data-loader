@@ -1,5 +1,6 @@
 from collections import Counter
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -26,7 +27,11 @@ STAGE_NAMES = (
 )
 
 
-def _stages(calls: Counter[str], fail_once: set[str]) -> PipelineStages:
+def _stages(
+    calls: Counter[str],
+    fail_once: set[str],
+    rehydrated: list[dict[str, dict[str, JSONValue]]] | None = None,
+) -> PipelineStages:
     def stage(name: str) -> Callable[[], dict[str, JSONValue]]:
         def run() -> dict[str, JSONValue]:
             calls[name] += 1
@@ -48,6 +53,9 @@ def _stages(calls: Counter[str], fail_once: set[str]) -> PipelineStages:
         postgres_dividends_sync=stage("postgres_dividends_sync"),
         postgres_splits_sync=stage("postgres_splits_sync"),
         verification=stage("verification"),
+        rehydrate=lambda details: (
+            rehydrated.append(dict(details)) if rehydrated is not None else None
+        ),
     )
 
 
@@ -84,8 +92,9 @@ def test_failed_run_resumes_without_repeating_completed_stages(tmp_path: Path) -
     assert calls["dividends"] == 1
     assert calls["splits"] == 0
 
+    rehydrated: list[dict[str, dict[str, JSONValue]]] = []
     summary = run_restartable_pipeline(
-        stages,
+        _stages(calls, set(), rehydrated),
         lock_path=lock_path,
         checkpoint_path=checkpoint_path,
     )
@@ -96,3 +105,28 @@ def test_failed_run_resumes_without_repeating_completed_stages(tmp_path: Path) -
     assert calls["quotes"] == 1
     assert calls["dividends"] == 2
     assert all(calls[name] == 1 for name in STAGE_NAMES[3:])
+    assert rehydrated == [
+        {
+            "listings": {"stage": "listings"},
+            "quotes": {"stage": "quotes"},
+        }
+    ]
+
+
+def test_checkpoint_without_fresh_runtime_rehydration_fails_closed(tmp_path: Path) -> None:
+    calls: Counter[str] = Counter()
+    checkpoint_path = tmp_path / "checkpoint.json"
+    with pytest.raises(PipelineStageError):
+        run_restartable_pipeline(
+            _stages(calls, {"quotes"}),
+            lock_path=tmp_path / "loader.lock",
+            checkpoint_path=checkpoint_path,
+        )
+
+    with pytest.raises(ValueError, match="rehydration hook"):
+        run_restartable_pipeline(
+            replace(_stages(calls, set()), rehydrate=None),
+            lock_path=tmp_path / "loader.lock",
+            checkpoint_path=checkpoint_path,
+        )
+    assert calls["dividends"] == 0

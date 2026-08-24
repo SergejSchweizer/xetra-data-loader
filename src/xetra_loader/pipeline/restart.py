@@ -39,6 +39,14 @@ class ConcurrentLoaderRunError(RuntimeError):
     """Raised when another loader process already owns the run lock."""
 
 
+@dataclass(frozen=True, slots=True)
+class RestartCheckpoint:
+    """Non-semantic, fail-closed evidence for a resumable weekly process."""
+
+    completed: tuple[str, ...]
+    details: Mapping[str, Mapping[str, JSONValue]]
+
+
 @dataclass(slots=True)
 class LoaderLock(AbstractContextManager["LoaderLock"]):
     """Advisory process lock automatically released on exit or process death."""
@@ -84,8 +92,12 @@ def run_restartable_pipeline(
     """Run once, resume after the last completed stage, and clear checkpoints on success."""
 
     with LoaderLock(lock_path):
-        completed = _read_checkpoint(checkpoint_path)
-        wrapped = _wrap_stages(stages, completed, checkpoint_path)
+        checkpoint = _read_checkpoint(checkpoint_path)
+        if checkpoint.completed:
+            if stages.rehydrate is None:
+                raise ValueError("checkpoint requires a runtime rehydration hook")
+            stages.rehydrate(checkpoint.details)
+        wrapped = _wrap_stages(stages, checkpoint, checkpoint_path)
         summary = run_weekly_pipeline(wrapped)
         checkpoint_path.unlink(missing_ok=True)
         return summary
@@ -93,17 +105,26 @@ def run_restartable_pipeline(
 
 def _wrap_stages(
     stages: PipelineStages,
-    completed: set[str],
+    checkpoint: RestartCheckpoint,
     checkpoint_path: Path,
 ) -> PipelineStages:
+    completed = set(checkpoint.completed)
+    details_by_stage = {name: dict(details) for name, details in checkpoint.details.items()}
+
     def wrap(name: str, stage: RestartStage) -> WrappedStage:
         def run() -> dict[str, JSONValue]:
             if name in completed:
                 return {"restart": "checkpoint-skip"}
             details = stage()
             completed.add(name)
-            _write_checkpoint(checkpoint_path, completed)
-            return {} if details is None else dict(details)
+            stage_details = {} if details is None else dict(details)
+            details_by_stage[name] = stage_details
+            ordered_completed = tuple(name for name in _STAGE_NAMES if name in completed)
+            _write_checkpoint(
+                checkpoint_path,
+                RestartCheckpoint(ordered_completed, details_by_stage),
+            )
+            return stage_details
 
         return run
 
@@ -118,12 +139,13 @@ def _wrap_stages(
         postgres_dividends_sync=wrap("postgres_dividends_sync", stages.postgres_dividends_sync),
         postgres_splits_sync=wrap("postgres_splits_sync", stages.postgres_splits_sync),
         verification=wrap("verification", stages.verification),
+        rehydrate=stages.rehydrate,
     )
 
 
-def _read_checkpoint(path: Path) -> set[str]:
+def _read_checkpoint(path: Path) -> RestartCheckpoint:
     if not path.exists():
-        return set()
+        return RestartCheckpoint((), {})
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict) or payload.get("version") != 1:
         raise ValueError("invalid loader checkpoint")
@@ -138,13 +160,26 @@ def _read_checkpoint(path: Path) -> set[str]:
     expected_prefix = set(_STAGE_NAMES[: len(completed)])
     if completed != expected_prefix:
         raise ValueError("loader checkpoint stages must form an ordered prefix")
-    return completed
+    raw_details = payload.get("details")
+    if not isinstance(raw_details, dict):
+        raise ValueError("invalid loader checkpoint stage details")
+    if set(raw_details) != completed:
+        raise ValueError("loader checkpoint details must match completed stages")
+    details: dict[str, Mapping[str, JSONValue]] = {}
+    for name, value in raw_details.items():
+        if not isinstance(value, dict):
+            raise ValueError("invalid loader checkpoint stage detail")
+        details[name] = value
+    return RestartCheckpoint(tuple(name for name in _STAGE_NAMES if name in completed), details)
 
 
-def _write_checkpoint(path: Path, completed: set[str]) -> None:
+def _write_checkpoint(path: Path, checkpoint: RestartCheckpoint) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    ordered = [name for name in _STAGE_NAMES if name in completed]
-    payload = {"version": 1, "completed": ordered}
+    payload = {
+        "version": 1,
+        "completed": list(checkpoint.completed),
+        "details": {name: dict(checkpoint.details[name]) for name in checkpoint.completed},
+    }
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
         json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
