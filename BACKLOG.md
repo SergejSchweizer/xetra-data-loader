@@ -46,7 +46,7 @@ Frozen rules:
 - `timestamp_eod = trade_date 00:00:00+00:00`; it is not a physical exchange-close timestamp;
 - incremental refresh overlap: seven calendar days;
 - unchanged source replay must cause zero semantic PostgreSQL mutations;
-- exact scheduler: `CRON_TZ=Europe/Vienna` and `0 12 * * 0`;
+- exact scheduler: `CRON_TZ=Europe/Vienna` and `0 8 * * 0`;
 - passwords, provider tokens, and full DSNs are never committed;
 - Portfell code, analytics, UI, users/tenants/projects, and authorization do not belong here;
 - the project is not complete until a real full XETRA bootstrap has been completely synchronized to PostgreSQL `10.10.1.3:54321` and independently verified by XDL-PR033.
@@ -483,7 +483,7 @@ This section is the newest authority. Where Sections 2, 4, 5, 6, 7, or 9 conflic
 
 Until XDL-PR038 is merged and deployed, the repository cron entry must be treated as **unsafe for unattended production use** because it currently schedules the destructive full bootstrap instead of the restartable weekly incremental runner. Do not use a scheduled `xdl-bootstrap --confirm-destructive-reset` as the normal weekly path.
 
-The canonical schedule is restored to the original XDL-PR029 contract: **Sunday 11:00 Europe/Vienna**, exactly `CRON_TZ=Europe/Vienna` plus `0 11 * * 0`. The later 12:00 and 08:00 variants are contract drift and are superseded by XDL-PR037.
+The canonical schedule is **Sunday 08:00 Europe/Vienna**, exactly `CRON_TZ=Europe/Vienna` plus `0 8 * * 0`, as explicitly selected for the deployed loader. Any differing time is contract drift and is superseded by XDL-PR037.
 
 The project is now complete only after **XDL-PR034 through XDL-PR053** are finished and XDL-PR053 produces a new real-target PostgreSQL acceptance report marked `PASS`.
 
@@ -551,7 +551,7 @@ Safe parallel start after PR034: PR035, PR036, PR037, PR041, PR043, PR044, and P
 | PR034 | `xdl-pr034-audit-corrective-backlog` | `docs/xdl-pr034-audit-corrective-backlog` | current `main` | audited corrective authority | this planning change |
 | PR035 | `xdl-pr035-repository-governance-repair` | `chore/xdl-pr035-repository-governance-repair` | PR034 | protected-main/auto-merge restored and proven | backlog |
 | PR036 | `xdl-pr036-real-postgres-ci` | `ci/xdl-pr036-real-postgres-ci` | PR034 | real PostgreSQL integration tests mandatory in CI | backlog |
-| PR037 | `xdl-pr037-scheduler-contract-reconciliation` | `fix/xdl-pr037-scheduler-contract-reconciliation` | PR034 | one exact Sunday 11:00 contract everywhere | backlog |
+| PR037 | `xdl-pr037-scheduler-contract-reconciliation` | `fix/xdl-pr037-scheduler-contract-reconciliation` | PR034 | one exact Sunday 08:00 contract everywhere | backlog |
 | PR038 | `xdl-pr038-production-weekly-runner-wiring` | `fix/xdl-pr038-production-weekly-runner-wiring` | PR037 | scheduled path is guarded weekly runner, never destructive bootstrap | backlog |
 | PR039 | `xdl-pr039-restart-state-rehydration` | `fix/xdl-pr039-restart-state-rehydration` | PR038 | real cross-process restart from persisted state | backlog |
 | PR040 | `xdl-pr040-incremental-weekly-refresh` | `fix/xdl-pr040-incremental-weekly-refresh` | PR039 | seven-day merged weekly refresh actually used | backlog |
@@ -607,9 +607,9 @@ Branch `fix/xdl-pr037-scheduler-contract-reconciliation`; commit scope `fix(xdl-
 
 Owned paths: `deploy/cron/xetra-loader.cron`, `tests/unit/test_sunday_schedule.py`, scheduler-only E2E assertions, `src/xetra_loader/ops/acceptance.py`, committed fixture acceptance artifact, scheduler statements in README/BACKLOG/docs.
 
-Tasks: restore the canonical original XDL-PR029 schedule to literal `CRON_TZ=Europe/Vienna` and `0 11 * * 0`; remove 08:00/12:00 hard-coded contradictions; derive/report the observed cron expression in acceptance code instead of passing a separate inconsistent constant.
+Tasks: enforce the selected schedule `CRON_TZ=Europe/Vienna` and `0 8 * * 0`; remove contradictory hard-coded times; derive/report the observed cron expression in acceptance code instead of passing a separate inconsistent constant.
 
-Acceptance: actual cron, unit test, E2E check, acceptance object, committed acceptance JSON, and documentation all say Sunday 11:00; winter/summer DST checks both preserve local 11:00; changing only the cron expression makes acceptance fail.
+Acceptance: actual cron, unit test, E2E check, acceptance object, committed acceptance JSON, and documentation all say Sunday 08:00; winter/summer DST checks both preserve local 08:00; changing only the cron expression makes acceptance fail.
 
 #### PR038 — xdl-pr038-production-weekly-runner-wiring
 
@@ -787,7 +787,7 @@ Tasks:
 9. Verify `portfell_app` SELECT-only behavior and normal writer least privilege with actual permission probes.
 10. Run the guarded weekly incremental path immediately against unchanged source state and require zero semantic inserts/updates/deletes/retractions across all four serving datasets; verify it uses overlap requests rather than a second destructive bootstrap.
 11. Emit a sanitized V2 report containing no password, token, DSN, or raw provider payload; mark `PASS` only if every assertion succeeds.
-12. Re-enable the recurring Sunday 11:00 runner only after the V2 report is `PASS`.
+12. Re-enable the recurring Sunday 08:00 runner only after the V2 report is `PASS`.
 
 Acceptance:
 
@@ -800,7 +800,7 @@ Acceptance:
 - every timestamp column remains exactly `TIMESTAMPTZ(6)` and runtime sessions are UTC;
 - weekly publication uses a non-superuser writer and `portfell_app` remains SELECT-only;
 - unchanged guarded weekly replay produces exactly zero semantic mutations and does not invoke destructive reset;
-- actual cron contract is exactly Sunday 11:00 Europe/Vienna and invokes the guarded weekly runner;
+- actual cron contract is exactly Sunday 08:00 Europe/Vienna and invokes the guarded weekly runner;
 - `artifacts/acceptance/postgres-full-sync-v2.json` is committed, sanitized, and `PASS`;
 - all quality jobs and `merge-gate` are green on the same PR053 head SHA;
 - only after these conditions hold may `xetra-loader` and the Portfell PostgreSQL handoff be declared complete.
