@@ -11,9 +11,9 @@ from xetra_loader.sync.core import JSONValue
 
 EXPECTED_ORDER = [
     "listings",
-    "quotes",
     "dividends",
     "splits",
+    "quotes",
     "gold_validation",
     "postgres_listings_sync",
     "postgres_quotes_sync",

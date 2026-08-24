@@ -33,6 +33,7 @@ class _WeeklyState:
     dividends: DividendGoldResult | None = None
     splits: SplitGoldResult | None = None
     outcomes: dict[str, SyncOutcome] = field(default_factory=dict)
+    action_changed_listings: set[tuple[str, str, str]] = field(default_factory=set)
 
     def ingest_listings(self) -> dict[str, JSONValue]:
         batch = self.runtime.fetch_listings()
@@ -60,12 +61,19 @@ class _WeeklyState:
             if not listing.is_active:
                 records.extend(listing_previous)
                 continue
+            action_changed = listing.key in self.action_changed_listings
             batch = self.runtime.fetch_quotes(
                 listing,
-                last_business_date=last_date,
-                previous_records=listing_previous,
+                last_business_date=None if action_changed else last_date,
+                previous_records=() if action_changed else listing_previous,
             )
-            records.extend(_replace_quote_window(listing_previous, batch.rows, last_date))
+            records.extend(
+                _replace_quote_window(
+                    listing_previous,
+                    batch.rows,
+                    None if action_changed else last_date,
+                )
+            )
             requests += batch.metrics.logical_requests
         self.quotes = build_quote_gold(records)
         self.runtime.persist_gold(
@@ -98,7 +106,10 @@ class _WeeklyState:
                 last_event_date=last_date,
                 previous_records=listing_previous,
             )
-            records.extend(_replace_action_window(listing_previous, batch.rows, last_date))
+            merged = _replace_action_window(listing_previous, batch.rows, last_date)
+            if _action_set_changed(listing_previous, merged):
+                self.action_changed_listings.add(listing.key)
+            records.extend(merged)
             requests += batch.metrics.logical_requests
         self.dividends = build_dividend_gold(records)
         self.runtime.persist_gold(
@@ -112,11 +123,13 @@ class _WeeklyState:
             "dividends",
             [_dividend_silver_row(record) for record in records],
         )
-        return _ingest_details(
+        details = _ingest_details(
             self.dividends.row_count,
             requests,
             self.dividends.semantic_fingerprint,
         )
+        details["changed_listing_keys"] = _changed_listing_keys(self.action_changed_listings)
+        return details
 
     def ingest_splits(self) -> dict[str, JSONValue]:
         listings = self._require_listings()
@@ -134,7 +147,10 @@ class _WeeklyState:
                 last_event_date=last_date,
                 previous_records=listing_previous,
             )
-            records.extend(_replace_action_window(listing_previous, batch.rows, last_date))
+            merged = _replace_action_window(listing_previous, batch.rows, last_date)
+            if _action_set_changed(listing_previous, merged):
+                self.action_changed_listings.add(listing.key)
+            records.extend(merged)
             requests += batch.metrics.logical_requests
         self.splits = build_split_gold(records)
         self.runtime.persist_gold(
@@ -148,7 +164,9 @@ class _WeeklyState:
             "splits",
             [_split_silver_row(record) for record in records],
         )
-        return _ingest_details(self.splits.row_count, requests, self.splits.semantic_fingerprint)
+        details = _ingest_details(self.splits.row_count, requests, self.splits.semantic_fingerprint)
+        details["changed_listing_keys"] = _changed_listing_keys(self.action_changed_listings)
+        return details
 
     def validate_gold(self) -> dict[str, JSONValue]:
         listings, quotes, dividends, splits = self._require_gold()
@@ -233,6 +251,11 @@ class _WeeklyState:
         ):
             if stage in checkpoint:
                 self.outcomes[dataset] = _outcome_from_checkpoint(dataset, checkpoint[stage])
+        for stage in ("dividends", "splits"):
+            if stage in checkpoint:
+                self.action_changed_listings.update(
+                    _changed_listing_keys_from_checkpoint(checkpoint[stage])
+                )
 
     def _require_listings(self) -> ListingGoldResult:
         if self.listings is None:
@@ -299,6 +322,30 @@ def _sync_details(outcome: SyncOutcome) -> dict[str, JSONValue]:
 
 def _ingest_details(rows: int, requests: int, fingerprint: str) -> dict[str, JSONValue]:
     return {"rows": rows, "requests": requests, "fingerprint": fingerprint}
+
+
+def _changed_listing_keys(keys: set[tuple[str, str, str]]) -> list[JSONValue]:
+    return [list(key) for key in sorted(keys)]
+
+
+def _changed_listing_keys_from_checkpoint(
+    details: Mapping[str, JSONValue],
+) -> tuple[tuple[str, str, str], ...]:
+    raw_keys = details.get("changed_listing_keys", [])
+    if not isinstance(raw_keys, list):
+        raise ValueError("checkpoint action changes must be a list")
+    keys: list[tuple[str, str, str]] = []
+    for key in raw_keys:
+        if (
+            not isinstance(key, list)
+            or len(key) != 3
+            or not all(isinstance(part, str) for part in key)
+        ):
+            raise ValueError("checkpoint action change key is invalid")
+        keys.append(cast(tuple[str, str, str], tuple(key)))
+    if keys != sorted(set(keys)):
+        raise ValueError("checkpoint action changes must be unique and sorted")
+    return tuple(keys)
 
 
 def _load_gold_artifact(
@@ -470,6 +517,17 @@ def _replace_action_window[T: DividendEvent | SplitEvent](
         return refreshed
     start = last_date - timedelta(days=7)
     return tuple(record for record in previous if record.event_date < start) + refreshed
+
+
+def _action_set_changed(
+    previous: tuple[DividendEvent, ...] | tuple[SplitEvent, ...],
+    merged: tuple[DividendEvent, ...] | tuple[SplitEvent, ...],
+) -> bool:
+    """Detect a provider-action change that can retroactively restate adjusted close."""
+
+    return {(record.key, record.status.value) for record in previous} != {
+        (record.key, record.status.value) for record in merged
+    }
 
 
 def _action_status(row: Mapping[str, JSONValue]) -> ActionStatus:

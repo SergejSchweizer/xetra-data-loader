@@ -82,3 +82,25 @@ def test_incremental_quote_refresh_replaces_only_requested_overlap(tmp_path: Pat
     ]
     assert runtime.persisted_silver[1]["close"] == "12"
     assert details["requests"] == 1
+
+
+def test_action_change_forces_one_listing_to_full_quote_history(tmp_path: Path) -> None:
+    runtime = _Runtime(tmp_path)
+    old_history = (_quote(14, "10"), _quote(22, "12"))
+    silver_path = runtime._layout.dataset_path(Layer.SILVER, "eod_quotes") / "data.json"
+    silver_path.parent.mkdir(parents=True)
+    silver_path.write_text(
+        canonical_json([record.semantic_dict() for record in old_history]), encoding="utf-8"
+    )
+    listing = ListingRecord("DE0000000001", "XETRA", "AAA")
+    state = _WeeklyState(runtime)  # type: ignore[arg-type]
+    state.listings = build_listing_gold([listing])
+    state.action_changed_listings.add(listing.key)
+
+    state.ingest_quotes()
+
+    assert runtime.calls == [(None, ())]
+    assert [row["trade_date"] for row in runtime.persisted_silver] == [
+        "2026-08-20",
+        "2026-08-22",
+    ]

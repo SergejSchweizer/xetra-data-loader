@@ -15,9 +15,9 @@ from xetra_loader.sync.core import JSONValue
 
 STAGE_NAMES = (
     "listings",
-    "quotes",
     "dividends",
     "splits",
+    "quotes",
     "gold_validation",
     "postgres_listings_sync",
     "postgres_quotes_sync",
@@ -88,8 +88,8 @@ def test_failed_run_resumes_without_repeating_completed_stages(tmp_path: Path) -
 
     assert checkpoint_path.exists()
     assert calls["listings"] == 1
-    assert calls["quotes"] == 1
     assert calls["dividends"] == 1
+    assert calls["quotes"] == 0
     assert calls["splits"] == 0
 
     rehydrated: list[dict[str, dict[str, JSONValue]]] = []
@@ -104,11 +104,10 @@ def test_failed_run_resumes_without_repeating_completed_stages(tmp_path: Path) -
     assert calls["listings"] == 1
     assert calls["quotes"] == 1
     assert calls["dividends"] == 2
-    assert all(calls[name] == 1 for name in STAGE_NAMES[3:])
+    assert all(calls[name] == 1 for name in STAGE_NAMES[2:])
     assert rehydrated == [
         {
             "listings": {"stage": "listings"},
-            "quotes": {"stage": "quotes"},
         }
     ]
 
@@ -118,7 +117,7 @@ def test_checkpoint_without_fresh_runtime_rehydration_fails_closed(tmp_path: Pat
     checkpoint_path = tmp_path / "checkpoint.json"
     with pytest.raises(PipelineStageError):
         run_restartable_pipeline(
-            _stages(calls, {"quotes"}),
+            _stages(calls, {"dividends"}),
             lock_path=tmp_path / "loader.lock",
             checkpoint_path=checkpoint_path,
         )
@@ -129,4 +128,4 @@ def test_checkpoint_without_fresh_runtime_rehydration_fails_closed(tmp_path: Pat
             lock_path=tmp_path / "loader.lock",
             checkpoint_path=checkpoint_path,
         )
-    assert calls["dividends"] == 0
+    assert calls["splits"] == 0

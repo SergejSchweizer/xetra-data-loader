@@ -123,9 +123,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _ordered_stages(stages: PipelineStages) -> tuple[tuple[str, StageCallable], ...]:
     return (
         ("listings", stages.listings),
-        ("quotes", stages.quotes),
         ("dividends", stages.dividends),
         ("splits", stages.splits),
+        ("quotes", stages.quotes),
         ("gold_validation", stages.gold_validation),
         ("postgres_listings_sync", stages.postgres_listings_sync),
         ("postgres_quotes_sync", stages.postgres_quotes_sync),
