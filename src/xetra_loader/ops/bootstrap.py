@@ -246,10 +246,14 @@ def run_full_bootstrap(
     listing_batch = runtime.fetch_listings()
     metrics += listing_batch.metrics
     listing_gold = build_listing_gold(listing_batch.rows)
+    listing_fetch_times = _batch_fetch_times(listing_batch)
 
     quotes: list[QuoteRecord] = []
     dividends: list[DividendEvent] = []
     splits: list[SplitEvent] = []
+    quote_fetch_times: dict[tuple[str, str, str, date], datetime] = {}
+    dividend_fetch_times: dict[tuple[str, str, str, str], datetime] = {}
+    split_fetch_times: dict[tuple[str, str, str, str], datetime] = {}
     for listing in listing_gold.rows:
         quote_batch = runtime.fetch_quotes(listing)
         dividend_batch = runtime.fetch_dividends(listing)
@@ -257,6 +261,9 @@ def run_full_bootstrap(
         quotes.extend(quote_batch.rows)
         dividends.extend(dividend_batch.rows)
         splits.extend(split_batch.rows)
+        quote_fetch_times.update(_batch_fetch_times(quote_batch))
+        dividend_fetch_times.update(_batch_fetch_times(dividend_batch))
+        split_fetch_times.update(_batch_fetch_times(split_batch))
         metrics += quote_batch.metrics + dividend_batch.metrics + split_batch.metrics
 
     quote_gold = build_quote_gold(quotes)
@@ -265,10 +272,10 @@ def run_full_bootstrap(
     _persist_all_gold(runtime, listing_gold, quote_gold, dividend_gold, split_gold)
 
     sync_outcomes = {
-        "listings": runtime.publish_listings(listing_gold),
-        "eod_quotes": runtime.publish_quotes(quote_gold),
-        "dividends": runtime.publish_dividends(dividend_gold),
-        "splits": runtime.publish_splits(split_gold),
+        "listings": _publish_listings(runtime, listing_gold, listing_fetch_times),
+        "eod_quotes": _publish_quotes(runtime, quote_gold, quote_fetch_times),
+        "dividends": _publish_dividends(runtime, dividend_gold, dividend_fetch_times),
+        "splits": _publish_splits(runtime, split_gold, split_fetch_times),
     }
     verification = runtime.verify(
         listing_gold,
@@ -288,6 +295,62 @@ def run_full_bootstrap(
         split_gold=split_gold,
         sync_outcomes=sync_outcomes,
         verification=verification,
+    )
+
+
+def _batch_fetch_times(batch: FetchBatch[Any]) -> dict[Any, datetime]:
+    """Associate every fetched semantic row with its measured provider response time."""
+
+    if batch.fetched_at_utc is None:
+        return {}
+    return {row.key: batch.fetched_at_utc for row in batch.rows}
+
+
+def _publish_listings(
+    runtime: BootstrapRuntime,
+    gold: ListingGoldResult,
+    fetched_at_by_key: Mapping[tuple[str, str, str], datetime],
+) -> SyncOutcome:
+    return (
+        runtime.publish_listings(gold, fetched_at_by_key=fetched_at_by_key)
+        if fetched_at_by_key
+        else runtime.publish_listings(gold)
+    )
+
+
+def _publish_quotes(
+    runtime: BootstrapRuntime,
+    gold: QuoteGoldResult,
+    fetched_at_by_key: Mapping[tuple[str, str, str, date], datetime],
+) -> SyncOutcome:
+    return (
+        runtime.publish_quotes(gold, fetched_at_by_key=fetched_at_by_key)
+        if fetched_at_by_key
+        else runtime.publish_quotes(gold)
+    )
+
+
+def _publish_dividends(
+    runtime: BootstrapRuntime,
+    gold: DividendGoldResult,
+    fetched_at_by_key: Mapping[tuple[str, str, str, str], datetime],
+) -> SyncOutcome:
+    return (
+        runtime.publish_dividends(gold, fetched_at_by_key=fetched_at_by_key)
+        if fetched_at_by_key
+        else runtime.publish_dividends(gold)
+    )
+
+
+def _publish_splits(
+    runtime: BootstrapRuntime,
+    gold: SplitGoldResult,
+    fetched_at_by_key: Mapping[tuple[str, str, str, str], datetime],
+) -> SyncOutcome:
+    return (
+        runtime.publish_splits(gold, fetched_at_by_key=fetched_at_by_key)
+        if fetched_at_by_key
+        else runtime.publish_splits(gold)
     )
 
 
