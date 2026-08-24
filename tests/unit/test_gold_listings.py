@@ -24,7 +24,9 @@ def test_gold_listing_rows_are_deterministic_and_load_compatible() -> None:
         "instrument_type",
         "currency",
         "country",
+        "is_active",
     )
+    assert result.semantic_rows()[0]["is_active"] is True
 
 
 def test_replay_fingerprint_is_stable_under_input_order() -> None:
