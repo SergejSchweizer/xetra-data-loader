@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Protocol, cast
 
-from xetra_loader.contracts.listings import ListingRecord, normalize_listings
+from xetra_loader.contracts.listings import (
+    ListingRecord,
+    merge_listing_lifecycle,
+    normalize_listings,
+)
 
 type JSONValue = str | int | float | bool | None | list[JSONValue] | dict[str, JSONValue]
 
@@ -30,20 +34,31 @@ class ListingIngestionResult:
     silver_records: tuple[ListingRecord, ...]
 
 
-def ingest_xetra_listings(transport: JsonTransport) -> ListingIngestionResult:
-    """Fetch every XETRA symbol and exclude only rows without a usable ISIN."""
+def ingest_xetra_listings(
+    transport: JsonTransport,
+    *,
+    previous_records: Iterable[ListingRecord] = (),
+) -> ListingIngestionResult:
+    """Fetch active and delisted XETRA symbols and retain vanished identities inactive."""
 
-    payload = transport.get_json("exchange-symbol-list/XETRA")
-    if not isinstance(payload, list):
+    active_payload = transport.get_json("exchange-symbol-list/XETRA")
+    delisted_payload = transport.get_json("exchange-symbol-list/XETRA", {"delisted": 1})
+    if not isinstance(active_payload, list) or not isinstance(delisted_payload, list):
         raise ValueError("EODHD XETRA listing response must be a JSON array")
 
-    rows: list[dict[str, object]] = []
     bronze_rows: list[dict[str, JSONValue]] = []
-    for item in payload:
+    active_rows: list[dict[str, object]] = []
+    delisted_rows: list[dict[str, object]] = []
+    for item in active_payload:
         if not isinstance(item, dict):
             raise ValueError("each EODHD XETRA listing must be a JSON object")
         bronze_rows.append(item)
-        rows.append(cast(dict[str, object], item))
+        active_rows.append(cast(dict[str, object], item))
+    for item in delisted_payload:
+        if not isinstance(item, dict):
+            raise ValueError("each EODHD XETRA listing must be a JSON object")
+        bronze_rows.append(item)
+        delisted_rows.append(cast(dict[str, object], item))
 
     bronze_rows.sort(key=_canonical_row)
     bronze_payload = json.dumps(
@@ -54,7 +69,11 @@ def ingest_xetra_listings(transport: JsonTransport) -> ListingIngestionResult:
     )
     return ListingIngestionResult(
         bronze_payload=bronze_payload,
-        silver_records=normalize_listings(rows),
+        silver_records=merge_listing_lifecycle(
+            normalize_listings(active_rows, is_active=True),
+            normalize_listings(delisted_rows, is_active=False),
+            previous_records,
+        ),
     )
 
 

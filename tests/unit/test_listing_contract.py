@@ -45,3 +45,13 @@ def test_round_trip_and_order_are_deterministic() -> None:
     payload = serialize_listings(reversed(records))
     assert deserialize_listings(payload) == records
     assert serialize_listings(deserialize_listings(payload)) == payload
+
+
+def test_listing_lifecycle_round_trips_as_semantic_contract() -> None:
+    records = normalize_listings(
+        [{"ISIN": "DE0000000001", "Exchange": "XETRA", "Code": "OLD"}],
+        is_active=False,
+    )
+
+    assert records[0].semantic_dict()["is_active"] is False
+    assert deserialize_listings(serialize_listings(records)) == records
