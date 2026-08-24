@@ -49,7 +49,7 @@ def sync_listings(
                     "INSERT INTO xetra_loader.listings "
                     "(isin, exchange, code, name, instrument_type, currency, country, is_active, "
                     "fetched_at_utc, published_at_utc) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     (*row.key, *semantic, published_at, published_at),
                 )
                 inserted += 1
