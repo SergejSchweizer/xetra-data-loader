@@ -92,6 +92,8 @@ class EodhdTransport:
             url,
             headers={"Accept": "application/json", "User-Agent": "xetra-loader"},
         )
+        safe_endpoint = _safe_endpoint(normalized_path)
+        failure: RuntimeError | None = None
 
         for attempt in range(1, self._retry_policy.max_attempts + 1):
             try:
@@ -104,17 +106,22 @@ class EodhdTransport:
                 return cast(JSONValue, payload)
             except HTTPError as exc:
                 if not _is_retryable_status(exc.code) or attempt == self._retry_policy.max_attempts:
-                    raise RuntimeError(
-                        f"EODHD request failed with HTTP {exc.code} for /{normalized_path}"
-                    ) from exc
+                    failure = RuntimeError(
+                        f"EODHD request failed with HTTP {exc.code} for {safe_endpoint}"
+                    )
+                    break
                 self._sleeper(_retry_delay(exc, self._retry_policy, attempt))
-            except URLError as exc:
+            except URLError:
                 if attempt == self._retry_policy.max_attempts:
-                    raise RuntimeError(f"EODHD request failed for /{normalized_path}") from exc
+                    failure = RuntimeError(f"EODHD request failed for {safe_endpoint}")
+                    break
                 self._sleeper(self._retry_policy.delay(attempt))
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                raise RuntimeError(f"EODHD returned invalid JSON for /{normalized_path}") from exc
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                failure = RuntimeError(f"EODHD returned invalid JSON for {safe_endpoint}")
+                break
 
+        if failure is not None:
+            raise failure
         raise AssertionError("retry loop exhausted unexpectedly")
 
 
@@ -134,6 +141,13 @@ def scrub_url(url: str) -> str:
     return urlunsplit(
         (parts.scheme, parts.netloc, parts.path, "&".join(safe_pairs), parts.fragment)
     )
+
+
+def _safe_endpoint(path: str) -> str:
+    """Return only a request path, never any caller-supplied query parameters."""
+
+    parsed = urlsplit(f"https://eodhd.invalid/{path.lstrip('/')}")
+    return parsed.path
 
 
 def _default_open(request: Request, timeout: float) -> BinaryResponse:

@@ -1,6 +1,8 @@
 from decimal import Decimal
+import traceback
 from email.message import Message
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import Request
 
 import pytest
@@ -76,20 +78,54 @@ def test_network_retries_are_bounded() -> None:
     assert sleeps == [0.1, 0.2]
 
 
-def test_permanent_http_error_is_not_retried_or_leaked() -> None:
-    attempts = 0
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    (
+        ("http-400", "HTTP 400"),
+        ("http-429", "HTTP 429"),
+        ("http-500", "HTTP 500"),
+        ("network", "request failed"),
+        ("invalid-json", "invalid JSON"),
+    ),
+)
+def test_provider_failures_never_retain_or_render_token(
+    failure: str,
+    expected: str,
+) -> None:
+    token = "do not/leak+this"
 
     def opener(request: Request, timeout: float) -> FakeResponse:
-        nonlocal attempts
-        attempts += 1
-        raise HTTPError(request.full_url, 400, "bad request", Message(), None)
+        del timeout
+        if failure.startswith("http-"):
+            status = int(failure.removeprefix("http-"))
+            raise HTTPError(request.full_url, status, "bad request", Message(), None)
+        if failure == "network":
+            raise URLError(request.full_url)
+        return FakeResponse(b"not-json")
 
-    transport = EodhdTransport(token="do-not-leak", opener=opener)
+    transport = EodhdTransport(
+        token=token,
+        opener=opener,
+        retry_policy=RetryPolicy(max_attempts=1),
+    )
     with pytest.raises(RuntimeError) as captured:
         transport.get_json("eod/AAA.XETRA")
-    assert attempts == 1
-    assert "do-not-leak" not in str(captured.value)
-    assert "HTTP 400" in str(captured.value)
+
+    error = captured.value
+    rendered = "\n".join(
+        [
+            str(error),
+            repr(error),
+            *traceback.format_exception(type(error), error, error.__traceback__),
+            repr(error.__cause__),
+            repr(error.__context__),
+        ]
+    )
+    assert token not in rendered
+    assert urlencode({"api_token": token}).split("=", 1)[1] not in rendered
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert expected in str(error)
 
 
 def test_scrub_url_removes_common_secret_query_parameters() -> None:
