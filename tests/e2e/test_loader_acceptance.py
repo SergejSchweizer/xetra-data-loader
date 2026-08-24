@@ -18,7 +18,11 @@ from xetra_loader.gold.dividends import build_dividend_gold
 from xetra_loader.gold.listings import build_listing_gold
 from xetra_loader.gold.quotes import build_quote_gold
 from xetra_loader.gold.splits import build_split_gold
-from xetra_loader.ops.acceptance import LoaderAcceptanceReport, write_acceptance_report
+from xetra_loader.ops.acceptance import (
+    LoaderAcceptanceReport,
+    read_scheduler_contract,
+    write_acceptance_report,
+)
 from xetra_loader.ops.bootstrap import (
     BootstrapVerification,
     FetchBatch,
@@ -253,7 +257,10 @@ def test_complete_loader_acceptance_matrix(tmp_path: Path) -> None:
     timestamp_contract = _timestamp_contract_is_exact()
     role_contract = _app_role_is_select_only()
     lock_contract = _lock_contract_holds(tmp_path)
-    scheduler_contract = _scheduler_contract()
+    scheduler_timezone, scheduler_expression = read_scheduler_contract()
+    scheduler_contract = (
+        scheduler_timezone == "Europe/Vienna" and scheduler_expression == "0 8 * * 0"
+    )
     portfell_imports = _count_portfell_imports()
 
     scenarios = {
@@ -284,8 +291,8 @@ def test_complete_loader_acceptance_matrix(tmp_path: Path) -> None:
         database_timezone="UTC",
         app_role="portfell_app",
         app_role_select_only=role_contract,
-        scheduler_timezone="Europe/Vienna",
-        scheduler_expression="0 12 * * 0",
+        scheduler_timezone=scheduler_timezone,
+        scheduler_expression=scheduler_expression,
         portfell_imports=portfell_imports,
     )
     assert report.passed
@@ -338,11 +345,6 @@ def _lock_contract_holds(tmp_path: Path) -> bool:
     with LoaderLock(lock_path):
         pass
     return True
-
-
-def _scheduler_contract() -> bool:
-    lines = Path("deploy/cron/xetra-loader.cron").read_text(encoding="utf-8").splitlines()
-    return lines[0] == "CRON_TZ=Europe/Vienna" and lines[1].startswith("0 8 * * 0 ")
 
 
 def _count_portfell_imports() -> int:

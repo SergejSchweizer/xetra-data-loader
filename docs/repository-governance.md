@@ -2,6 +2,20 @@
 
 This repository uses pull-request-only delivery to `main` after XDL-PR006.
 
+## XDL-PR035 repair evidence
+
+Observed before the XDL-PR035 repair (2026-08-24): GitHub returned `404 Branch not
+protected` for `main`, and the repository reported `allow_auto_merge=false`.
+
+Verified after the repair: GitHub reports `main.protected=true`, requires the exact
+`merge-gate` check with strict current-head enforcement, requires pull requests,
+enforces protections for administrators, blocks force pushes and branch deletion,
+requires conversation resolution, and reports `allow_auto_merge=true`.
+
+GitHub enforces direct-push rejection through this protection. The enforcement
+configuration above is the safe verification evidence; attempting a known-invalid
+push solely to prove rejection is not part of normal repository operation.
+
 ## Required `main` protections
 
 The GitHub repository configuration is part of the XDL-PR006 acceptance contract and must enforce all of the following:

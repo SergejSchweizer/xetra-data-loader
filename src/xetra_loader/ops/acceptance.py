@@ -8,6 +8,9 @@ from pathlib import Path
 
 from xetra_loader.medallion.core import JSONValue, canonical_json
 
+_CRON_PATH = Path("deploy/cron/xetra-loader.cron")
+_SCHEDULE_FIELDS = 5
+
 
 @dataclass(frozen=True, slots=True)
 class LoaderAcceptanceReport:
@@ -31,7 +34,7 @@ class LoaderAcceptanceReport:
             and self.database_timezone == "UTC"
             and self.app_role_select_only
             and self.scheduler_timezone == "Europe/Vienna"
-            and self.scheduler_expression == "0 12 * * 0"
+            and self.scheduler_expression == "0 8 * * 0"
             and self.portfell_imports == 0
         )
 
@@ -54,6 +57,18 @@ class LoaderAcceptanceReport:
                 "expression": self.scheduler_expression,
             },
         }
+
+
+def read_scheduler_contract(path: Path = _CRON_PATH) -> tuple[str, str]:
+    """Read the timezone and five-field expression deployed in the cron contract."""
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if len(lines) < 2 or not lines[0].startswith("CRON_TZ="):
+        raise ValueError("cron contract must start with CRON_TZ and contain one schedule")
+    schedule_fields = lines[1].split(maxsplit=_SCHEDULE_FIELDS)
+    if len(schedule_fields) <= _SCHEDULE_FIELDS:
+        raise ValueError("cron contract must contain a command after five schedule fields")
+    return lines[0].removeprefix("CRON_TZ="), " ".join(schedule_fields[:_SCHEDULE_FIELDS])
 
 
 def write_acceptance_report(report: LoaderAcceptanceReport, path: Path) -> Path:
