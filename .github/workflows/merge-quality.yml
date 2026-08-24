@@ -51,6 +51,23 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: xdl_test
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres -d xdl_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      XDL_REQUIRE_POSTGRES_INTEGRATION: "1"
+      XDL_TEST_POSTGRES_DSN: postgresql://postgres:postgres@localhost:5432/xdl_test
     steps:
       - uses: actions/checkout@v4
         with:
@@ -76,7 +93,7 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           git fetch --no-tags origin main:refs/remotes/origin/main
-          mapfile -t commits < <(git log origin/main..HEAD --format=%s)
+          mapfile -t commits < <(git log --no-merges origin/main..HEAD --format=%s)
           args=(--branch "$BRANCH_NAME" --pr-title "$PR_TITLE")
           for subject in "${commits[@]}"; do
             args+=(--commit "$subject")
