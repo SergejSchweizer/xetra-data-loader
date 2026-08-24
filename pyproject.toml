@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-xdl-weekly = "xetra_loader.pipeline.orchestrator:main"
+xdl-weekly = "xetra_loader.pipeline.runner:main"
 xdl-bootstrap = "xetra_loader.ops.bootstrap:main"
 xdl-verify-production-sync = "xetra_loader.ops.verify_postgres_sync:main"
 
