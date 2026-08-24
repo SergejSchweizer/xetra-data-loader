@@ -474,3 +474,339 @@ Any old PR297-PR307 implementation branch is superseded and must not be merged a
 - **XDL-PR033's sanitized production PostgreSQL acceptance report is `PASS`.**
 
 No fixture-only success, partial table sync, successful writer counters without independent reconciliation, or unverified production database state may be treated as project completion.
+
+## 10. Corrective audit wave — reviewed 2026-08-24
+
+### 10.1 Authority override and operational stop gate
+
+This section is the newest authority. Where Sections 2, 4, 5, 6, 7, or 9 conflict with this section, **Section 10 supersedes them**. The audit found material drift between the stated contracts and `origin/main`, so XDL-PR033 is no longer a valid final completion gate by itself.
+
+Until XDL-PR038 is merged and deployed, the repository cron entry must be treated as **unsafe for unattended production use** because it currently schedules the destructive full bootstrap instead of the restartable weekly incremental runner. Do not use a scheduled `xdl-bootstrap --confirm-destructive-reset` as the normal weekly path.
+
+The canonical schedule is restored to the original XDL-PR029 contract: **Sunday 11:00 Europe/Vienna**, exactly `CRON_TZ=Europe/Vienna` plus `0 11 * * 0`. The later 12:00 and 08:00 variants are contract drift and are superseded by XDL-PR037.
+
+The project is now complete only after **XDL-PR034 through XDL-PR053** are finished and XDL-PR053 produces a new real-target PostgreSQL acceptance report marked `PASS`.
+
+### 10.2 Audit findings mapped to corrective work
+
+The corrective wave addresses these observed defects, ambiguities, or incomplete guarantees:
+
+- GitHub currently reports `main` as unprotected and repository auto-merge as disabled although XDL-PR006 and the governance document claim the opposite; direct XDL-PR033 commits exist on `main` without a PR/merge-gate.
+- the scheduler contract is contradictory: historical XDL-PR029 says 11:00, earlier backlog text says 12:00, current cron/tests say 08:00, and the committed E2E acceptance artifact still reports 12:00 while `origin/main` actually schedules 08:00;
+- the current cron invokes `xdl-bootstrap --confirm-destructive-reset`, so every scheduled run can drop loader-owned PostgreSQL schemas and rebuild all data instead of doing a normal incremental refresh;
+- the restart wrapper checkpoints only stage names, while the production pipeline keeps required listing/Gold/sync state only in memory; a new process cannot actually resume after a skipped completed stage;
+- the production weekly runtime calls quote/dividend/split ingestion without the existing `last_*` and `previous_records` inputs, so it performs full-history requests rather than the frozen seven-calendar-day overlap refresh;
+- dividend and split ingestion reject multiple events on the same date even though event identity is already content-addressed and same-date multiple corporate actions are valid data;
+- adjusted-close history can change retroactively after corporate-action corrections, so a seven-day quote overlap alone is not a sufficient reconciliation rule;
+- EODHD transport chains raw HTTP exceptions whose URL can contain `api_token`, so secret-safe traceback behavior is not proven;
+- provider JSON floating-point values are decoded through binary floats before conversion to `Decimal`, numeric canonicalization is representation-sensitive, and fractional/non-finite provider numerics are not rejected consistently;
+- Gold validation does not prove that every quote/dividend/split identity exists in listing Gold; the runtime `gold_validation` stage currently reports counts only;
+- corporate-action Gold fingerprints include retracted keys, but the persisted Gold `data.json` contains only active rows, so the disk artifact cannot independently reproduce that fingerprint or rehydrate all tombstones;
+- medallion series are accumulated in memory and the whole growing Bronze/Silver dataset is rewritten after each listing, creating avoidable O(N²) write amplification during a full universe load;
+- EODHD's exchange-symbol endpoint distinguishes active and delisted listings, but the repository currently requests only the default active set while the backlog alternates between “all XETRA listings” and “current universe” language;
+- listing and quote PostgreSQL syncs upsert present rows but do not remove stale serving rows absent from the authoritative merged Gold state;
+- CI's PostgreSQL integration tests are conditional on `XDL_TEST_POSTGRES_DSN`, while the GitHub Actions integration jobs provision no PostgreSQL service or DSN, so real database tests can be skipped while `merge-gate` still passes;
+- normal runtime configuration points at an administrative PostgreSQL connection even though a least-privilege writer role exists; the writer role also has unnecessary `CREATE` on the sync schema after provisioning;
+- serving `fetched_at_utc` is currently populated with the publication timestamp rather than an observed provider-fetch timestamp, making provenance names inaccurate;
+- because numeric/event identity, listing-lifecycle, and serving reconciliation semantics will change in this corrective wave, the final PostgreSQL serving state must be rewritten and independently reverified instead of accepting the current database as authoritative.
+
+### 10.3 Corrective dependency graph
+
+```text
+XDL-PR034
+   |
+   +---------------- PR035 ------------------+
+   |                                         |
+   +---------------- PR036 ------------------+
+   |                                         |
+   +--> PR037 -> PR038 -> PR039 -> PR040 ----+----> PR042
+   |                                         |        ^
+   +---------------- PR041 ------------------+--------+
+   |
+   +---------------- PR043 ------------------+
+   |                                         |
+   +---------------- PR044 ------------------+
+   |                                         |
+   +---------------- PR045 ------------------+
+   |                                         |
+   +------------ PR041+PR044 -> PR046 -> PR047
+   |
+   +------------ PR043+PR044 -> PR048 -> PR049
+   |
+   +------ PR040+PR045+PR046+PR049 -> PR050
+   |
+   +------------ PR035+PR036 -> PR051
+   |
+   +------------ PR040+PR051 -> PR052
+   |
+   +------------------------------------------------> PR053
+```
+
+Safe parallel start after PR034: PR035, PR036, PR037, PR041, PR043, PR044, and PR045. PR053 is deliberately final and serial.
+
+### 10.4 Corrective work-order index
+
+| ID | Work-order | Branch | Depends on | Atomic result | Status |
+| --- | --- | --- | --- | --- | --- |
+| PR034 | `xdl-pr034-audit-corrective-backlog` | `docs/xdl-pr034-audit-corrective-backlog` | current `main` | audited corrective authority | this planning change |
+| PR035 | `xdl-pr035-repository-governance-repair` | `chore/xdl-pr035-repository-governance-repair` | PR034 | protected-main/auto-merge restored and proven | backlog |
+| PR036 | `xdl-pr036-real-postgres-ci` | `ci/xdl-pr036-real-postgres-ci` | PR034 | real PostgreSQL integration tests mandatory in CI | backlog |
+| PR037 | `xdl-pr037-scheduler-contract-reconciliation` | `fix/xdl-pr037-scheduler-contract-reconciliation` | PR034 | one exact Sunday 11:00 contract everywhere | backlog |
+| PR038 | `xdl-pr038-production-weekly-runner-wiring` | `fix/xdl-pr038-production-weekly-runner-wiring` | PR037 | scheduled path is guarded weekly runner, never destructive bootstrap | backlog |
+| PR039 | `xdl-pr039-restart-state-rehydration` | `fix/xdl-pr039-restart-state-rehydration` | PR038 | real cross-process restart from persisted state | backlog |
+| PR040 | `xdl-pr040-incremental-weekly-refresh` | `fix/xdl-pr040-incremental-weekly-refresh` | PR039 | seven-day merged weekly refresh actually used | backlog |
+| PR041 | `xdl-pr041-corporate-action-set-reconciliation` | `fix/xdl-pr041-corporate-action-set-reconciliation` | PR034 | same-date multiple corporate actions supported | backlog |
+| PR042 | `xdl-pr042-adjusted-close-retroactive-reconciliation` | `fix/xdl-pr042-adjusted-close-retroactive-reconciliation` | PR040+PR041 | corporate-action changes trigger affected full quote reconciliation | backlog |
+| PR043 | `xdl-pr043-provider-secret-safe-errors` | `fix/xdl-pr043-provider-secret-safe-errors` | PR034 | provider tokens cannot leak through tracebacks/errors | backlog |
+| PR044 | `xdl-pr044-provider-numeric-integrity` | `fix/xdl-pr044-provider-numeric-integrity` | PR034 | exact Decimal/canonical numeric semantics and validation | backlog |
+| PR045 | `xdl-pr045-gold-cross-dataset-validation` | `fix/xdl-pr045-gold-cross-dataset-validation` | PR034 | Gold proves child-to-listing referential integrity | backlog |
+| PR046 | `xdl-pr046-corporate-action-gold-tombstones` | `fix/xdl-pr046-corporate-action-gold-tombstones` | PR041+PR044 | persisted Gold fully represents retractions | backlog |
+| PR047 | `xdl-pr047-atomic-streamed-medallion-persistence` | `refactor/xdl-pr047-atomic-streamed-medallion-persistence` | PR046 | bounded-memory, atomic medallion writes | backlog |
+| PR048 | `xdl-pr048-listing-lifecycle-contract` | `feat/xdl-pr048-listing-lifecycle-contract` | PR043+PR044 | active+delisted XETRA lifecycle is explicit | backlog |
+| PR049 | `xdl-pr049-listing-lifecycle-postgres-migration` | `feat/xdl-pr049-listing-lifecycle-postgres-migration` | PR048 | lifecycle field propagated through Gold/PostgreSQL | backlog |
+| PR050 | `xdl-pr050-authoritative-postgres-reconciliation` | `fix/xdl-pr050-authoritative-postgres-reconciliation` | PR040+PR045+PR046+PR049 | PostgreSQL exactly reconciles to full merged Gold | backlog |
+| PR051 | `xdl-pr051-runtime-role-hardening` | `fix/xdl-pr051-runtime-role-hardening` | PR035+PR036 | weekly runtime uses non-superuser writer permissions | backlog |
+| PR052 | `xdl-pr052-fetch-publication-provenance` | `fix/xdl-pr052-fetch-publication-provenance` | PR040+PR051 | fetch and publication timestamps have exact meanings | backlog |
+| PR053 | `xdl-pr053-postgres-authoritative-rewrite` | `chore/xdl-pr053-postgres-authoritative-rewrite` | PR035-PR052 | backup, full rewrite, independent real-target PASS | backlog/final gate |
+
+### 10.5 Exact corrective PR specifications
+
+#### PR034 — xdl-pr034-audit-corrective-backlog
+
+Branch `docs/xdl-pr034-audit-corrective-backlog`; commit scope `docs(xdl-pr034-audit-corrective-backlog): ...`; depends on the audited `origin/main` head.
+
+Owned path: `BACKLOG.md` only.
+
+Tasks: record only evidenced defects/ambiguities; add PR035-PR053 with exact dependencies/ownership/acceptance; explicitly supersede the old final completion claim; require a controlled PostgreSQL rewrite after semantic/schema fixes.
+
+Acceptance: no production implementation changes; every finding has a corrective owner; no two sibling PRs own the same primary implementation path unless a dependency orders them.
+
+#### PR035 — xdl-pr035-repository-governance-repair
+
+Branch `chore/xdl-pr035-repository-governance-repair`; commit scope `chore(xdl-pr035-repository-governance-repair): ...`; depends on PR034.
+
+Owned scope: GitHub repository settings plus `docs/repository-governance.md` verification evidence only.
+
+Tasks: enable repository auto-merge; protect `main`; require pull requests and the exact `merge-gate`; require checks on the current head; block direct pushes, force pushes, and branch deletion; document the observed pre-fix state and post-fix state.
+
+Acceptance: GitHub API reports `main.protected=true`; required status context includes exactly `merge-gate`; direct push to `main` is rejected; auto-merge is enabled; a representative PR cannot merge while the gate is pending/failing and can merge only after required checks pass.
+
+#### PR036 — xdl-pr036-real-postgres-ci
+
+Branch `ci/xdl-pr036-real-postgres-ci`; commit scope `ci(xdl-pr036-real-postgres-ci): ...`; depends on PR034.
+
+Owned paths: `.github/workflows/push-quality.yml`, `.github/workflows/merge-quality.yml`, CI-only PostgreSQL test bootstrap, focused CI contract tests.
+
+Tasks: provision an isolated PostgreSQL service in both integration jobs; set `XDL_TEST_POSTGRES_DSN` to that service; initialize the schemas/roles needed by tests; make the CI path fail if the real PostgreSQL suite is not configured or is skipped; keep lint/type/unit/policy parallel.
+
+Acceptance: `test_market_schema_postgres.py`, sync-core, entity-sync, role, and production-verifier integration tests all execute against the service rather than report `SKIPPED`; deliberately breaking SQL makes `integration` and therefore `merge-gate` fail; local developer runs may still skip when no explicit test DSN is supplied.
+
+#### PR037 — xdl-pr037-scheduler-contract-reconciliation
+
+Branch `fix/xdl-pr037-scheduler-contract-reconciliation`; commit scope `fix(xdl-pr037-scheduler-contract-reconciliation): ...`; depends on PR034.
+
+Owned paths: `deploy/cron/xetra-loader.cron`, `tests/unit/test_sunday_schedule.py`, scheduler-only E2E assertions, `src/xetra_loader/ops/acceptance.py`, committed fixture acceptance artifact, scheduler statements in README/BACKLOG/docs.
+
+Tasks: restore the canonical original XDL-PR029 schedule to literal `CRON_TZ=Europe/Vienna` and `0 11 * * 0`; remove 08:00/12:00 hard-coded contradictions; derive/report the observed cron expression in acceptance code instead of passing a separate inconsistent constant.
+
+Acceptance: actual cron, unit test, E2E check, acceptance object, committed acceptance JSON, and documentation all say Sunday 11:00; winter/summer DST checks both preserve local 11:00; changing only the cron expression makes acceptance fail.
+
+#### PR038 — xdl-pr038-production-weekly-runner-wiring
+
+Branch `fix/xdl-pr038-production-weekly-runner-wiring`; commit scope `fix(xdl-pr038-production-weekly-runner-wiring): ...`; depends on PR037.
+
+Owned paths: production runner CLI wiring, `pyproject.toml` script entry, cron command portion, runner tests only.
+
+Tasks: expose one non-interactive guarded weekly entry point around `run_restartable_pipeline`; derive lock/checkpoint paths from `XDL_MEDALLION_ROOT`; make cron invoke that guarded weekly runner and concrete production stage factory; keep `xdl-bootstrap --confirm-destructive-reset` manual-only and absent from every recurring scheduler.
+
+Acceptance: scheduled command contains no destructive-reset flag; concurrent scheduled runs are rejected; normal weekly execution cannot drop PostgreSQL schemas or delete medallion layers; the bootstrap CLI still requires explicit manual confirmation.
+
+#### PR039 — xdl-pr039-restart-state-rehydration
+
+Branch `fix/xdl-pr039-restart-state-rehydration`; commit scope `fix(xdl-pr039-restart-state-rehydration): ...`; depends on PR038.
+
+Owned paths: `src/xetra_loader/pipeline/restart.py`, persisted restart-state codec/loader, focused restart tests.
+
+Tasks: make restart data sufficient for a new process, not just the same in-memory `PipelineStages`; rehydrate listing/quote/dividend/split Gold state from persisted medallion artifacts; persist/recover required sync run IDs/fingerprints/counters as non-semantic checkpoint metadata; validate that completed stage names form a prefix and that every required artifact matches the checkpoint fingerprint before skipping.
+
+Acceptance: simulate process death after each stage boundary, build a fresh runtime/state object, resume successfully without rerunning already committed semantic mutations, and finish verification; missing/corrupt/mismatched persisted state fails closed instead of skipping.
+
+#### PR040 — xdl-pr040-incremental-weekly-refresh
+
+Branch `fix/xdl-pr040-incremental-weekly-refresh`; commit scope `fix(xdl-pr040-incremental-weekly-refresh): ...`; depends on PR039.
+
+Owned paths: weekly production runtime incremental-state loading/merging plus focused tests; no provider transport or schema changes.
+
+Tasks: load the existing full Silver/Gold state; for each listing determine the latest quote/event date; call quote/dividend/split ingestion with the frozen inclusive seven-calendar-day overlap and previous records; replace the requested quote-window slice with the provider response, reconcile corporate actions over the same window, and merge the refreshed window back into the complete historical state before Gold; first-ever listing remains full-history.
+
+Acceptance: an unchanged weekly fixture issues overlap requests, not full-history requests, for existing listings; rows older than the overlap survive unchanged; one corrected row replaces exactly one key; a provider-removed quote inside the authoritative requested window disappears from merged Gold; new dates/events append once; unchanged merged Gold produces zero semantic PostgreSQL mutations.
+
+#### PR041 — xdl-pr041-corporate-action-set-reconciliation
+
+Branch `fix/xdl-pr041-corporate-action-set-reconciliation`; commit scope `fix(xdl-pr041-corporate-action-set-reconciliation): ...`; depends on PR034.
+
+Owned paths: dividend/split reconciliation helpers and their unit fixtures/tests only.
+
+Tasks: remove the one-event-per-date assumption; reconcile the authoritative overlap as sets keyed by deterministic `event_key`; exact current keys remain active, prior active keys absent from the current overlap become retractions, and new current keys become active events; do not require heuristic one-to-one correction matching by date.
+
+Acceptance: two dividends on one date and two splits on one date are accepted; changing one of two same-date events produces exactly one old-key retraction plus one new active key while the second remains unchanged; removing one produces exactly one retraction; provider-order changes are deterministic.
+
+#### PR042 — xdl-pr042-adjusted-close-retroactive-reconciliation
+
+Branch `fix/xdl-pr042-adjusted-close-retroactive-reconciliation`; commit scope `fix(xdl-pr042-adjusted-close-retroactive-reconciliation): ...`; depends on PR040+PR041.
+
+Owned paths: weekly orchestration order/action-delta decision and quote-refresh tests only.
+
+Tasks: process dividend/split overlap before final quote refresh; if either corporate-action set changes for a listing, fetch that listing's full EOD history with no `from` boundary and replace its complete quote history before Gold; otherwise retain the normal seven-day quote overlap path; document that `adjusted_close` is provider-adjusted and can be retroactively restated.
+
+Acceptance: unchanged corporate actions use only overlap quote fetch; adding/correcting/retracting a corporate action forces exactly one full quote-history refresh for the affected listing and no other listing; a fixture where an old adjusted close changes is corrected; immediate unchanged replay returns to overlap mode and zero semantic DB mutations.
+
+#### PR043 — xdl-pr043-provider-secret-safe-errors
+
+Branch `fix/xdl-pr043-provider-secret-safe-errors`; commit scope `fix(xdl-pr043-provider-secret-safe-errors): ...`; depends on PR034.
+
+Owned paths: `src/xetra_loader/eodhd/transport.py` error/redaction behavior and focused tests.
+
+Tasks: ensure all provider failures construct sanitized exceptions; never retain a raw request URL containing `api_token` in user-visible exception text, `repr`, chained cause, or captured traceback; use `scrub_url` or suppress/replace the raw `HTTPError` cause; preserve HTTP status/path diagnostics without secrets.
+
+Acceptance: tests capture `str(exc)`, `repr(exc)`, `traceback.format_exc()`, and exception causes for 4xx/429/5xx/network/invalid JSON paths; the literal token and its URL-encoded form occur zero times; useful endpoint/status information remains.
+
+#### PR044 — xdl-pr044-provider-numeric-integrity
+
+Branch `fix/xdl-pr044-provider-numeric-integrity`; commit scope `fix(xdl-pr044-provider-numeric-integrity): ...`; depends on PR034.
+
+Owned paths: provider JSON numeric decoding/canonical numeric helpers, quote/corporate-action numeric normalization, focused contract/ingestion tests.
+
+Tasks: avoid binary-float round trips for provider decimals; preserve exact decimal semantics from JSON; canonicalize semantically equal decimal values to one deterministic text representation for event keys/fingerprints; reject NaN/Infinity/non-finite numerics; require volume to be an exact non-negative integer rather than truncate a fractional value; require positive split factors and non-negative market prices; validate `low <= open/close <= high` when all involved fields are present.
+
+Acceptance: `1`, `1.0`, and `1.00` canonicalize to the same semantic number/fingerprint; an exact long decimal survives ingestion unchanged; fractional volume fails; NaN/Infinity fail; inconsistent OHLC fails; provider raw Bronze remains preserved for diagnostics; deterministic event keys are stable under harmless numeric representation changes.
+
+#### PR045 — xdl-pr045-gold-cross-dataset-validation
+
+Branch `fix/xdl-pr045-gold-cross-dataset-validation`; commit scope `fix(xdl-pr045-gold-cross-dataset-validation): ...`; depends on PR034.
+
+Owned paths: Gold cross-dataset validator, production `gold_validation` stage, focused tests.
+
+Tasks: validate the four completed Gold results together; require every quote/dividend/split `(isin,exchange,code)` to exist in listing Gold; retain each dataset's duplicate/key/timestamp checks; return an exact validation summary/fingerprints rather than count-only success.
+
+Acceptance: one orphan quote/dividend/split fails before any PostgreSQL mutation; valid children of active or retained inactive listings pass; `gold_validation` output contains row counts and fingerprints for all four datasets; removing a listing referenced by a child fails closed.
+
+#### PR046 — xdl-pr046-corporate-action-gold-tombstones
+
+Branch `fix/xdl-pr046-corporate-action-gold-tombstones`; commit scope `fix(xdl-pr046-corporate-action-gold-tombstones): ...`; depends on PR041+PR044.
+
+Owned paths: corporate-action Gold persistence/reload sidecars, manifest metadata, verifier/restart readers, focused tests.
+
+Tasks: persist dividend/split `retracted_keys` deterministically alongside active Gold rows, e.g. `retractions.json`; include the tombstone content in the manifest/fingerprint contract; make restart and independent verification reload both active rows and retractions; do not silently substitute an empty retraction set.
+
+Acceptance: a Gold result containing a tombstone round-trips disk -> runtime with identical fingerprint; deleting or altering the tombstone sidecar makes manifest verification fail; a restarted sync still applies the intended retraction exactly once.
+
+#### PR047 — xdl-pr047-atomic-streamed-medallion-persistence
+
+Branch `refactor/xdl-pr047-atomic-streamed-medallion-persistence`; commit scope `refactor(xdl-pr047-atomic-streamed-medallion-persistence): ...`; depends on PR046.
+
+Owned paths: `PostgresEodhdBootstrapRuntime` medallion write mechanics, partition layout helper, focused filesystem tests; no serving schema changes.
+
+Tasks: stop holding/re-serializing the entire growing Bronze/Silver universe after every listing; persist deterministic per-listing partitions or an equivalent bounded-memory stream; write data and manifests through temporary files followed by atomic replace; publish the final dataset manifest only after all partitions are complete; keep semantic ordering/fingerprints independent of provider order.
+
+Acceptance: processing N listings performs O(N) partition writes rather than rewriting the accumulated universe N times; peak runtime state does not require all raw provider payloads in one list; injected failure leaves the last committed dataset/manifest readable and no partially published manifest; replay fingerprints remain identical.
+
+#### PR048 — xdl-pr048-listing-lifecycle-contract
+
+Branch `feat/xdl-pr048-listing-lifecycle-contract`; commit scope `feat(xdl-pr048-listing-lifecycle-contract): ...`; depends on PR043+PR044.
+
+Owned paths: listing contract/ingestion, lifecycle merge helper, provider fixtures/tests only; no SQL changes.
+
+Tasks: make “all XETRA listings” exact: fetch the EODHD exchange-symbol list once for the default active set and once with `delisted=1`; retain every normalized non-empty-ISIN identity from the union; add semantic `is_active`; mark default-set rows active and delisted-only rows inactive; retain a previously known identity as inactive if it temporarily disappears from both current responses; no ETF/UCITS/type/country/currency filtering.
+
+Acceptance: active-only, delisted-only, and mixed fixtures merge deterministically; no identity is duplicated; a delisted identity stays in historical listing Gold with `is_active=false`; reactivation flips only `is_active`; an identity disappearing from the provider is retained inactive rather than silently deleted.
+
+#### PR049 — xdl-pr049-listing-lifecycle-postgres-migration
+
+Branch `feat/xdl-pr049-listing-lifecycle-postgres-migration`; commit scope `feat(xdl-pr049-listing-lifecycle-postgres-migration): ...`; depends on PR048.
+
+Owned paths: one forward PostgreSQL migration, canonical schema DDL, listing DTO/Gold/sync field propagation, focused unit/integration tests.
+
+Tasks: add `is_active BOOLEAN NOT NULL` to the listing serving contract; safely backfill existing rows as active before the first lifecycle refresh; include the field in listing Gold fingerprints and semantic sync comparisons; preserve primary/FK identities and `portfell_app` SELECT compatibility.
+
+Acceptance: migration succeeds on an existing populated schema without dropping child data; clean-create DDL and migrated DDL introspect identically; one active->inactive transition is exactly one listing update; quote/dividend/split FKs remain valid; no consumer write privilege is introduced.
+
+#### PR050 — xdl-pr050-authoritative-postgres-reconciliation
+
+Branch `fix/xdl-pr050-authoritative-postgres-reconciliation`; commit scope `fix(xdl-pr050-authoritative-postgres-reconciliation): ...`; depends on PR040+PR045+PR046+PR049.
+
+Owned paths: listing/quote/corporate-action serving reconciliation, sync counters, focused PostgreSQL integration tests.
+
+Tasks: make the complete merged Gold state the only input accepted by entity publication; quotes delete serving keys absent from complete merged quote Gold; corporate-action tombstones remove retracted serving events; listings are retained historically and become inactive rather than hard-deleted; preserve transaction coupling with sync state and exact inserted/updated/deleted/retracted counters.
+
+Acceptance: after each sync PostgreSQL has zero extra keys relative to the complete merged Gold state; a removed quote produces exactly one `deleted`; a delisted/disappeared listing remains with `is_active=false`; no child is orphaned; injected failure rolls back both data and sync state; a complete unchanged replay has exactly zero mutations.
+
+#### PR051 — xdl-pr051-runtime-role-hardening
+
+Branch `fix/xdl-pr051-runtime-role-hardening`; commit scope `fix(xdl-pr051-runtime-role-hardening): ...`; depends on PR035+PR036.
+
+Owned paths: PostgreSQL role/grant SQL, configuration resolver, runtime DB preflight, role integration tests, README secret/config documentation.
+
+Tasks: keep `xetra-loader` as a NOLOGIN group role; run normal weekly publication through a non-superuser login that is a member of that role; separate admin/migration/bootstrap DSN from normal writer DSN; reject a superuser session in the normal weekly path; after schema provisioning revoke unnecessary `CREATE` on `xetra_loader_sync` and grant only required DML/USAGE; keep `portfell_app` a read-only group role.
+
+Acceptance: weekly runtime succeeds as the least-privilege writer and fails closed as an accidental superuser/admin DSN; writer cannot create/drop schemas/tables; writer can perform required serving/sync DML; bootstrap/migrations still require explicit admin configuration; `portfell_app` remains SELECT-only with no sync-schema access.
+
+#### PR052 — xdl-pr052-fetch-publication-provenance
+
+Branch `fix/xdl-pr052-fetch-publication-provenance`; commit scope `fix(xdl-pr052-fetch-publication-provenance): ...`; depends on PR040+PR051.
+
+Owned paths: fetch-batch/run metadata propagation, entity publication timestamp arguments, serving/provenance tests and docs only.
+
+Tasks: define `fetched_at_utc` as the provider-fetch time of the semantic version currently stored and `published_at_utc` as the transaction publication time; carry the measured fetch timestamp from provider batch through Gold publication; do not set both columns from one publication clock; keep both fields outside semantic fingerprints; leave unchanged semantic rows untouched so a no-op poll does not create a serving mutation, while `loader_runs` records the poll.
+
+Acceptance: a newly inserted/changed row has independently controlled fetch and publication timestamps; `fetched_at_utc <= published_at_utc`; unchanged replay does not update serving metadata and reports zero semantic mutations; loader run metadata still records the replay; fingerprints are unchanged by either timestamp.
+
+#### PR053 — xdl-pr053-postgres-authoritative-rewrite
+
+Branch `chore/xdl-pr053-postgres-authoritative-rewrite`; commit scope `chore(xdl-pr053-postgres-authoritative-rewrite): ...`; depends on every PR035-PR052 merged and green.
+
+Atomic outcome: perform the mandatory controlled rewrite of loader-owned medallion/serving state after all corrected contracts are frozen, then independently prove the real target PostgreSQL is exact. This supersedes XDL-PR033 as the final production gate.
+
+Owned paths:
+
+- production rewrite/runbook and one guarded orchestration command;
+- updated independent verifier for lifecycle/tombstone/numeric/provenance contracts;
+- sanitized `artifacts/acceptance/postgres-full-sync-v2.json` and human-readable acceptance summary;
+- no new business semantics beyond PR035-PR052.
+
+Tasks:
+
+1. Acquire the loader lock and require the recurring scheduler to be disabled for the rewrite window.
+2. Preflight the exact target `10.10.1.3:54321`; fail if another host/port is resolved.
+3. Create a timestamped, non-repository backup of the current `xetra_loader` and `xetra_loader_sync` schemas plus current Gold manifests before any destructive action; record backup checksums/path in the private run log, not committed credentials/data.
+4. Record pre-rewrite row counts, key/fingerprint summaries, and listing lifecycle counts for comparison.
+5. Apply all forward migrations required by PR049/PR051, then perform one confirmed loader-owned rewrite/rebuild where semantic event keys/fingerprints require it; never touch unrelated PostgreSQL schemas or unrelated filesystem paths.
+6. Fetch the complete active+delisted XETRA listing union and full available quote/dividend/split histories under the corrected exact-numeric contracts; build validated Gold including corporate-action tombstones and cross-dataset references.
+7. Publish through the least-privilege writer using PR050's authoritative reconciliation; schema/admin work remains on the explicit admin connection only.
+8. Independently read Gold and PostgreSQL and require exact row counts, zero symmetric key differences, matching semantic fingerprints, zero duplicate keys, zero orphans, matching date bounds, exact `TIMESTAMPTZ(6)`, UTC sessions, listing lifecycle equality, and tombstone/fingerprint integrity.
+9. Verify `portfell_app` SELECT-only behavior and normal writer least privilege with actual permission probes.
+10. Run the guarded weekly incremental path immediately against unchanged source state and require zero semantic inserts/updates/deletes/retractions across all four serving datasets; verify it uses overlap requests rather than a second destructive bootstrap.
+11. Emit a sanitized V2 report containing no password, token, DSN, or raw provider payload; mark `PASS` only if every assertion succeeds.
+12. Re-enable the recurring Sunday 11:00 runner only after the V2 report is `PASS`.
+
+Acceptance:
+
+- backup completed before rewrite and can be restored according to the runbook;
+- only loader-owned state is rewritten;
+- active+delisted listing lifecycle is represented exactly and historical listing identities are retained inactive rather than silently dropped;
+- PostgreSQL serving data is byte/semantic-contract equivalent to corrected Gold under independent verification;
+- all corrected corporate-action event keys and numeric fingerprints are represented after the rewrite;
+- no duplicate keys or orphans exist;
+- every timestamp column remains exactly `TIMESTAMPTZ(6)` and runtime sessions are UTC;
+- weekly publication uses a non-superuser writer and `portfell_app` remains SELECT-only;
+- unchanged guarded weekly replay produces exactly zero semantic mutations and does not invoke destructive reset;
+- actual cron contract is exactly Sunday 11:00 Europe/Vienna and invokes the guarded weekly runner;
+- `artifacts/acceptance/postgres-full-sync-v2.json` is committed, sanitized, and `PASS`;
+- all quality jobs and `merge-gate` are green on the same PR053 head SHA;
+- only after these conditions hold may `xetra-loader` and the Portfell PostgreSQL handoff be declared complete.
+
+### 10.6 Corrected completion gate
+
+The completion claims in Sections 7 and 9 are superseded. XDL-PR033 and the existing fixture acceptance artifact are historical evidence only and are **not sufficient for cutover**.
+
+`xetra-loader` is complete only when PR035-PR052 are merged under repaired governance and PR053's real-target V2 rewrite/verification is `PASS`. Until then, Portfell may read the documented schema for development but must not treat the database as a fully reconciled production contract.
