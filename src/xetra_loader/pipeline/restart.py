@@ -23,9 +23,9 @@ type WrappedStage = Callable[[], dict[str, JSONValue]]
 
 _STAGE_NAMES = (
     "listings",
-    "quotes",
     "dividends",
     "splits",
+    "quotes",
     "gold_validation",
     "postgres_listings_sync",
     "postgres_quotes_sync",

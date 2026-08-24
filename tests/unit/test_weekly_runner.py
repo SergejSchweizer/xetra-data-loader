@@ -32,9 +32,9 @@ def test_weekly_runner_uses_medallion_root_for_lock_and_checkpoint(tmp_path: Pat
     assert main(stages_factory=lambda: _stages(calls), medallion_root=tmp_path) == 0
     assert calls == [
         "listings",
-        "quotes",
         "dividends",
         "splits",
+        "quotes",
         "gold_validation",
         "postgres_listings_sync",
         "postgres_quotes_sync",
