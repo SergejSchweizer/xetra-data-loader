@@ -679,7 +679,7 @@ def _fetch_semantic_rows(
 ) -> tuple[dict[str, JSONValue], ...]:
     queries = {
         "listings": (
-            "SELECT isin, exchange, code, name, instrument_type, currency, country "
+            "SELECT isin, exchange, code, name, instrument_type, currency, country, is_active "
             "FROM xetra_loader.listings ORDER BY isin, exchange, code"
         ),
         "eod_quotes": (
@@ -718,6 +718,7 @@ def _listing_row(row: Sequence[object]) -> dict[str, JSONValue]:
         "instrument_type": _optional_text(row[4]),
         "currency": _optional_text(row[5]),
         "country": _optional_text(row[6]),
+        "is_active": bool(cast(bool, row[7])),
     }
 
 
