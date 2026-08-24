@@ -436,11 +436,13 @@ class PostgresEodhdBootstrapRuntime:
         transport: _MeasuredTransport,
         medallion_root: Path,
         repository_root: Path,
+        quarantine_invalid_ohlc: bool = False,
     ) -> None:
         self._connection = connection
         self._transport = transport
         self._layout = MedallionLayout(medallion_root.resolve())
         self._repository_root = repository_root.resolve()
+        self._quarantine_invalid_ohlc = quarantine_invalid_ohlc
 
     @classmethod
     def from_environment(cls) -> PostgresEodhdBootstrapRuntime:
@@ -453,13 +455,18 @@ class PostgresEodhdBootstrapRuntime:
         )
 
     @classmethod
-    def from_admin_environment(cls) -> PostgresEodhdBootstrapRuntime:
+    def from_admin_environment(
+        cls,
+        *,
+        quarantine_invalid_ohlc: bool = False,
+    ) -> PostgresEodhdBootstrapRuntime:
         root = resolve_medallion_root()
         return cls(
             connection=connect_postgres(admin=True),
             transport=_MeasuredTransport(),
             medallion_root=Path(root),
             repository_root=Path.cwd(),
+            quarantine_invalid_ohlc=quarantine_invalid_ohlc,
         )
 
     def reset_owned_state(self) -> None:
@@ -494,6 +501,7 @@ class PostgresEodhdBootstrapRuntime:
             listing,
             last_business_date=last_business_date,
             previous_records=previous_records,
+            quarantine_invalid_ohlc=self._quarantine_invalid_ohlc,
         )
         metrics = self._measurement_finish(before, len(result.silver_records))
         self._record_partition_bronze("eod_quotes", listing, result.bronze_payload)

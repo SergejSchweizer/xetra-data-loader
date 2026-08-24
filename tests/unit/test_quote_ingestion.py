@@ -104,10 +104,23 @@ def test_all_zero_ohlc_with_valid_close_is_a_missing_provider_sentinel() -> None
     assert isinstance(row, dict)
     row.update({"open": 0, "high": 0, "low": 0, "close": 20.15})
 
-    result = ingest_quotes(FixtureTransport(payload), _listing())
+    result = ingest_quotes(FixtureTransport(payload), _listing(), quarantine_invalid_ohlc=True)
 
     quote = result.silver_records[0]
     assert quote.open is None
     assert quote.high is None
     assert quote.low is None
     assert str(quote.close) == "20.15"
+
+
+def test_invalid_provider_ohlc_is_retained_in_bronze_and_quarantined_from_silver() -> None:
+    payload = _payload(extra=True)
+    invalid = payload[0]
+    assert isinstance(invalid, dict)
+    invalid.update({"open": 11, "high": 10, "low": 9, "close": 10})
+
+    result = ingest_quotes(FixtureTransport(payload), _listing(), quarantine_invalid_ohlc=True)
+
+    assert len(result.silver_records) == 1
+    assert result.silver_records[0].trade_date == date(2026, 8, 22)
+    assert '"date":"2026-08-21"' in result.bronze_payload

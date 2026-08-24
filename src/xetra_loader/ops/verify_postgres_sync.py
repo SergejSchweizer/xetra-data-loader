@@ -352,7 +352,7 @@ def execute_production_full_sync_and_verify(
 
         _backup_owned_state(root, backup_root)
         runtime = _AdminResetWriterPublishRuntime(
-            PostgresEodhdBootstrapRuntime.from_admin_environment()
+            PostgresEodhdBootstrapRuntime.from_admin_environment(quarantine_invalid_ohlc=True)
         )
         try:
             initial = run_full_bootstrap(runtime, confirmed=True, reset_owned_state=True)
