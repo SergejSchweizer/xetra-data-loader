@@ -28,29 +28,36 @@ def sync_listings(
         updated = 0
         for row in gold.rows:
             cursor.execute(
-                "SELECT name, instrument_type, currency, country "
+                "SELECT name, instrument_type, currency, country, is_active "
                 "FROM xetra_loader.listings "
                 "WHERE isin = %s AND exchange = %s AND code = %s",
                 row.key,
             )
             existing = cast(
-                tuple[str | None, str | None, str | None, str | None] | None,
+                tuple[str | None, str | None, str | None, str | None, bool] | None,
                 cursor.fetchone(),
             )
-            semantic = (row.name, row.instrument_type, row.currency, row.country)
+            semantic = (
+                row.name,
+                row.instrument_type,
+                row.currency,
+                row.country,
+                row.is_active,
+            )
             if existing is None:
                 cursor.execute(
                     "INSERT INTO xetra_loader.listings "
-                    "(isin, exchange, code, name, instrument_type, currency, country, "
+                    "(isin, exchange, code, name, instrument_type, currency, country, is_active, "
                     "fetched_at_utc, published_at_utc) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     (*row.key, *semantic, published_at, published_at),
                 )
                 inserted += 1
             elif existing != semantic:
                 cursor.execute(
                     "UPDATE xetra_loader.listings SET name = %s, instrument_type = %s, "
-                    "currency = %s, country = %s, fetched_at_utc = %s, published_at_utc = %s "
+                    "currency = %s, country = %s, is_active = %s, fetched_at_utc = %s, "
+                    "published_at_utc = %s "
                     "WHERE isin = %s AND exchange = %s AND code = %s",
                     (*semantic, published_at, published_at, *row.key),
                 )

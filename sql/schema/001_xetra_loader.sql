@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS xetra_loader.listings (
     instrument_type TEXT,
     currency TEXT,
     country TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     fetched_at_utc TIMESTAMPTZ(6) NOT NULL,
     published_at_utc TIMESTAMPTZ(6) NOT NULL,
     PRIMARY KEY (isin, exchange, code),
