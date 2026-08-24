@@ -1,5 +1,5 @@
-from decimal import Decimal
 import traceback
+from decimal import Decimal
 from email.message import Message
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
