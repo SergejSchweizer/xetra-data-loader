@@ -41,7 +41,7 @@ def ingest_splits(
     last_event_date: date | None = None,
     previous_records: Iterable[SplitEvent] = (),
 ) -> SplitIngestionResult:
-    """Fetch full history or overlap and reconcile corrections/retractions by event date."""
+    """Fetch history and reconcile authoritative event sets by content-addressed key."""
 
     params: dict[str, str | int | float] = {}
     if last_event_date is not None:
@@ -61,20 +61,16 @@ def ingest_splits(
     active_previous = tuple(
         record for record in previous_records if record.status is ActionStatus.ACTIVE
     )
-    previous_by_date = _unique_by_date(active_previous)
-    current_by_date = _unique_by_date(current)
-    reconciled: list[SplitEvent] = list(current_by_date.values())
-    corrections = 0
-    retractions = 0
+    previous_by_key = _by_event_key(active_previous)
+    current_by_key = _by_event_key(current)
+    reconciled: list[SplitEvent] = list(current_by_key.values())
+    removed_keys = tuple(sorted(previous_by_key.keys() - current_by_key.keys()))
+    added_keys = current_by_key.keys() - previous_by_key.keys()
+    corrections = min(len(removed_keys), len(added_keys))
+    retractions = len(removed_keys) - corrections
 
-    for event_date, previous in previous_by_date.items():
-        current_event = current_by_date.get(event_date)
-        if current_event is None:
-            reconciled.append(retract_split(previous))
-            retractions += 1
-        elif current_event.event_key != previous.event_key:
-            reconciled.append(retract_split(previous))
-            corrections += 1
+    for event_key in removed_keys:
+        reconciled.append(retract_split(previous_by_key[event_key]))
 
     bronze_rows.sort(key=_canonical_row)
     reconciled.sort(key=lambda event: (event.event_date, event.event_key, event.status.value))
@@ -104,12 +100,10 @@ def _normalize_split(listing: ListingRecord, row: Mapping[str, JSONValue]) -> Sp
     )
 
 
-def _unique_by_date(records: Iterable[SplitEvent]) -> dict[date, SplitEvent]:
-    result: dict[date, SplitEvent] = {}
+def _by_event_key(records: Iterable[SplitEvent]) -> dict[str, SplitEvent]:
+    result: dict[str, SplitEvent] = {}
     for record in records:
-        if record.event_date in result:
-            raise ValueError(f"multiple split events share date {record.event_date}")
-        result[record.event_date] = record
+        result[record.event_key] = record
     return result
 
 
