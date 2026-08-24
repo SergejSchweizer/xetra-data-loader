@@ -8,6 +8,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from xetra_loader.contracts.corporate_actions import ActionStatus, SplitEvent
+from xetra_loader.contracts.numeric import canonical_decimal
 
 type JSONValue = str | int | float | bool | None | list[JSONValue] | dict[str, JSONValue]
 
@@ -73,5 +74,7 @@ def _serving_row(event: SplitEvent) -> dict[str, JSONValue]:
         "event_key": event.event_key,
         "event_date": event.event_date.isoformat(),
         "split_ratio": event.split_ratio,
-        "split_factor": None if event.split_factor is None else str(event.split_factor),
+        "split_factor": (
+            None if event.split_factor is None else canonical_decimal(event.split_factor)
+        ),
     }

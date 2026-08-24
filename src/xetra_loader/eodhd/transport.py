@@ -7,6 +7,7 @@ import os
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Protocol, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit
@@ -95,7 +96,11 @@ class EodhdTransport:
         for attempt in range(1, self._retry_policy.max_attempts + 1):
             try:
                 with self._opener(request, self._timeout_seconds) as response:
-                    payload = json.loads(response.read().decode("utf-8"))
+                    payload = json.loads(
+                        response.read().decode("utf-8"),
+                        parse_float=Decimal,
+                        parse_constant=Decimal,
+                    )
                 return cast(JSONValue, payload)
             except HTTPError as exc:
                 if not _is_retryable_status(exc.code) or attempt == self._retry_policy.max_attempts:
