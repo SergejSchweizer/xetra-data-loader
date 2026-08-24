@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any, cast
@@ -28,6 +29,7 @@ def sync_dividends(
     *,
     run_id: str | None = None,
     published_at_utc: datetime | None = None,
+    fetched_at_by_key: Mapping[tuple[str, str, str, str], datetime] | None = None,
 ) -> SyncOutcome:
     """Apply active dividend events and tombstone retractions in one transaction."""
 
@@ -60,6 +62,7 @@ def sync_dividends(
                 retracted += cursor.rowcount
 
         for event in gold.rows:
+            fetched_at = _fetched_at(event.key, fetched_at_by_key, published_at)
             cursor.execute(
                 "SELECT event_date, declaration_date, record_date, payment_date, value, "
                 "currency, period FROM xetra_loader.dividends "
@@ -82,7 +85,7 @@ def sync_dividends(
                     "(isin, exchange, code, event_key, event_date, declaration_date, record_date, "
                     "payment_date, value, currency, period, fetched_at_utc, published_at_utc) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                    (*event.key, *semantic, published_at, published_at),
+                    (*event.key, *semantic, fetched_at, published_at),
                 )
                 inserted += 1
             elif existing != semantic:
@@ -91,7 +94,7 @@ def sync_dividends(
                     "record_date = %s, payment_date = %s, value = %s, currency = %s, period = %s, "
                     "fetched_at_utc = %s, published_at_utc = %s "
                     "WHERE isin = %s AND exchange = %s AND code = %s AND event_key = %s",
-                    (*semantic, published_at, published_at, *event.key),
+                    (*semantic, fetched_at, published_at, *event.key),
                 )
                 updated += 1
         existing_keys = cursor.execute(
@@ -121,3 +124,15 @@ def _require_utc(value: datetime) -> None:
     offset = value.utcoffset()
     if value.tzinfo is None or offset is None or offset != UTC.utcoffset(value):
         raise ValueError("published_at_utc must be timezone-aware UTC")
+
+
+def _fetched_at(
+    key: tuple[str, str, str, str],
+    values: Mapping[tuple[str, str, str, str], datetime] | None,
+    published_at: datetime,
+) -> datetime:
+    value = published_at if values is None else values.get(key, published_at)
+    _require_utc(value)
+    if value > published_at:
+        raise ValueError("fetched_at_utc must not be after published_at_utc")
+    return value
