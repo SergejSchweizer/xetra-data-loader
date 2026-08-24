@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+import os
+import tempfile
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import TextIO
 
 type JSONValue = str | int | float | bool | None | list[JSONValue] | dict[str, JSONValue]
 
@@ -35,6 +38,10 @@ class MedallionLayout:
 
     def retractions_path(self, layer: Layer, dataset: str) -> Path:
         return self.dataset_path(layer, dataset) / "retractions.json"
+
+    def partition_path(self, layer: Layer, dataset: str, partition: str) -> Path:
+        _validate_component(partition)
+        return self.dataset_path(layer, dataset) / "partitions" / f"{partition}.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +76,37 @@ def canonical_json(value: JSONValue) -> str:
     """Serialize JSON deterministically for stable fingerprints and manifests."""
 
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def atomic_write(path: Path, write: Callable[[TextIO], None]) -> None:
+    """Durably replace one artifact without exposing a partial published file."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        text=True,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            write(handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def atomic_write_text(path: Path, content: str) -> None:
+    """Atomically replace a complete text artifact."""
+
+    def write(handle: TextIO) -> None:
+        handle.write(content)
+
+    atomic_write(path, write)
 
 
 def _validate_component(value: str) -> None:
