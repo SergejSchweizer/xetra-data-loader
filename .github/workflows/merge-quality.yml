@@ -93,7 +93,7 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           git fetch --no-tags origin main:refs/remotes/origin/main
-          mapfile -t commits < <(git log origin/main..HEAD --format=%s)
+          mapfile -t commits < <(git log --no-merges origin/main..HEAD --format=%s)
           args=(--branch "$BRANCH_NAME" --pr-title "$PR_TITLE")
           for subject in "${commits[@]}"; do
             args+=(--commit "$subject")
