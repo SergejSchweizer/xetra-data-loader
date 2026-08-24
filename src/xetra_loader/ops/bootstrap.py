@@ -106,12 +106,10 @@ class BootstrapVerification:
         return {
             "passed": self.passed,
             "row_counts": {
-                name: [expected, actual]
-                for name, (expected, actual) in self.row_counts.items()
+                name: [expected, actual] for name, (expected, actual) in self.row_counts.items()
             },
             "key_differences": {
-                name: [missing, extra]
-                for name, (missing, extra) in self.key_differences.items()
+                name: [missing, extra] for name, (missing, extra) in self.key_differences.items()
             },
             "date_bounds_match": dict(self.date_bounds_match),
             "sync_state_match": dict(self.sync_state_match),
@@ -161,9 +159,27 @@ class BootstrapRuntime(Protocol):
 
     def reset_owned_state(self) -> None: ...
     def fetch_listings(self) -> FetchBatch[ListingRecord]: ...
-    def fetch_quotes(self, listing: ListingRecord) -> FetchBatch[QuoteRecord]: ...
-    def fetch_dividends(self, listing: ListingRecord) -> FetchBatch[DividendEvent]: ...
-    def fetch_splits(self, listing: ListingRecord) -> FetchBatch[SplitEvent]: ...
+    def fetch_quotes(
+        self,
+        listing: ListingRecord,
+        *,
+        last_business_date: date | None = None,
+        previous_records: Iterable[QuoteRecord] = (),
+    ) -> FetchBatch[QuoteRecord]: ...
+    def fetch_dividends(
+        self,
+        listing: ListingRecord,
+        *,
+        last_event_date: date | None = None,
+        previous_records: Iterable[DividendEvent] = (),
+    ) -> FetchBatch[DividendEvent]: ...
+    def fetch_splits(
+        self,
+        listing: ListingRecord,
+        *,
+        last_event_date: date | None = None,
+        previous_records: Iterable[SplitEvent] = (),
+    ) -> FetchBatch[SplitEvent]: ...
 
     def persist_gold(
         self,
@@ -371,9 +387,20 @@ class PostgresEodhdBootstrapRuntime:
         self._write_layer(Layer.SILVER, "listings", cast(JSONValue, silver))
         return FetchBatch(result.silver_records, metrics)
 
-    def fetch_quotes(self, listing: ListingRecord) -> FetchBatch[QuoteRecord]:
+    def fetch_quotes(
+        self,
+        listing: ListingRecord,
+        *,
+        last_business_date: date | None = None,
+        previous_records: Iterable[QuoteRecord] = (),
+    ) -> FetchBatch[QuoteRecord]:
         before = self._measurement_start()
-        result = ingest_quotes(self._transport, listing)
+        result = ingest_quotes(
+            self._transport,
+            listing,
+            last_business_date=last_business_date,
+            previous_records=previous_records,
+        )
         metrics = self._measurement_finish(before, len(result.silver_records))
         self._record_partition_bronze("eod_quotes", listing, result.bronze_payload)
         self._write_partition(
@@ -384,9 +411,20 @@ class PostgresEodhdBootstrapRuntime:
         )
         return FetchBatch(result.silver_records, metrics)
 
-    def fetch_dividends(self, listing: ListingRecord) -> FetchBatch[DividendEvent]:
+    def fetch_dividends(
+        self,
+        listing: ListingRecord,
+        *,
+        last_event_date: date | None = None,
+        previous_records: Iterable[DividendEvent] = (),
+    ) -> FetchBatch[DividendEvent]:
         before = self._measurement_start()
-        result = ingest_dividends(self._transport, listing)
+        result = ingest_dividends(
+            self._transport,
+            listing,
+            last_event_date=last_event_date,
+            previous_records=previous_records,
+        )
         metrics = self._measurement_finish(before, len(result.silver_records))
         self._record_partition_bronze("dividends", listing, result.bronze_payload)
         self._write_partition(
@@ -397,9 +435,20 @@ class PostgresEodhdBootstrapRuntime:
         )
         return FetchBatch(result.silver_records, metrics)
 
-    def fetch_splits(self, listing: ListingRecord) -> FetchBatch[SplitEvent]:
+    def fetch_splits(
+        self,
+        listing: ListingRecord,
+        *,
+        last_event_date: date | None = None,
+        previous_records: Iterable[SplitEvent] = (),
+    ) -> FetchBatch[SplitEvent]:
         before = self._measurement_start()
-        result = ingest_splits(self._transport, listing)
+        result = ingest_splits(
+            self._transport,
+            listing,
+            last_event_date=last_event_date,
+            previous_records=previous_records,
+        )
         metrics = self._measurement_finish(before, len(result.silver_records))
         self._record_partition_bronze("splits", listing, result.bronze_payload)
         self._write_partition(
@@ -448,6 +497,19 @@ class PostgresEodhdBootstrapRuntime:
             manifest.to_json() + "\n",
         )
 
+    def persist_silver(
+        self,
+        dataset: str,
+        semantic_rows: Sequence[Mapping[str, JSONValue]],
+    ) -> None:
+        """Replace the complete normalized Silver state after an incremental merge."""
+
+        self._write_layer(
+            Layer.SILVER,
+            dataset,
+            cast(JSONValue, [dict(row) for row in semantic_rows]),
+        )
+
     def publish_listings(self, gold: ListingGoldResult) -> SyncOutcome:
         return sync_listings(self._connection, gold)
 
@@ -470,17 +532,13 @@ class PostgresEodhdBootstrapRuntime:
     ) -> BootstrapVerification:
         expected_keys: dict[str, set[tuple[str, ...]]] = {
             "listings": {tuple(row.key) for row in listing_gold.rows},
-            "eod_quotes": {
-                tuple(str(value) for value in row.key) for row in quote_gold.rows
-            },
+            "eod_quotes": {tuple(str(value) for value in row.key) for row in quote_gold.rows},
             "dividends": {tuple(row.key) for row in dividend_gold.rows},
             "splits": {tuple(row.key) for row in split_gold.rows},
         }
         actual_keys = {
             "listings": self._keys("listings", "isin, exchange, code"),
-            "eod_quotes": self._keys(
-                "eod_quotes", "isin, exchange, code, trade_date::text"
-            ),
+            "eod_quotes": self._keys("eod_quotes", "isin, exchange, code, trade_date::text"),
             "dividends": self._keys("dividends", "isin, exchange, code, event_key"),
             "splits": self._keys("splits", "isin, exchange, code, event_key"),
         }
@@ -507,8 +565,7 @@ class PostgresEodhdBootstrapRuntime:
             == _bounds(record.event_date for record in split_gold.rows),
         }
         sync_state_match = {
-            name: self._sync_state_matches(name, outcome)
-            for name, outcome in sync_outcomes.items()
+            name: self._sync_state_matches(name, outcome) for name, outcome in sync_outcomes.items()
         }
         return BootstrapVerification(
             row_counts=row_counts,
@@ -593,17 +650,13 @@ class PostgresEodhdBootstrapRuntime:
         atomic_write_text(directory / "data.json", canonical_json(payload) + "\n")
 
     def _count(self, table: str) -> int:
-        row = self._connection.execute(
-            f'SELECT count(*) FROM xetra_loader."{table}"'
-        ).fetchone()
+        row = self._connection.execute(f'SELECT count(*) FROM xetra_loader."{table}"').fetchone()
         if row is None:
             raise RuntimeError(f"missing count result for {table}")
         return int(row[0])
 
     def _keys(self, table: str, columns: str) -> set[tuple[str, ...]]:
-        rows = self._connection.execute(
-            f'SELECT {columns} FROM xetra_loader."{table}"'
-        ).fetchall()
+        rows = self._connection.execute(f'SELECT {columns} FROM xetra_loader."{table}"').fetchall()
         return {tuple(str(value) for value in row) for row in rows}
 
     def _date_bounds(self, table: str, column: str) -> tuple[date | None, date | None]:

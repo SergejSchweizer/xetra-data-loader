@@ -6,14 +6,14 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import cast
 
-from xetra_loader.contracts.corporate_actions import DividendEvent, SplitEvent
+from xetra_loader.contracts.corporate_actions import ActionStatus, DividendEvent, SplitEvent
 from xetra_loader.contracts.listings import deserialize_listings
-from xetra_loader.contracts.quotes import QuoteRecord
+from xetra_loader.contracts.quotes import QuoteRecord, overlap_start
 from xetra_loader.gold.dividends import DividendGoldResult, build_dividend_gold
 from xetra_loader.gold.listings import ListingGoldResult, build_listing_gold
 from xetra_loader.gold.quotes import QuoteGoldResult, build_quote_gold
@@ -51,11 +51,21 @@ class _WeeklyState:
 
     def ingest_quotes(self) -> dict[str, JSONValue]:
         listings = self._require_listings()
+        previous = _quotes_from_rows(_load_silver_rows(self.runtime._layout.root, "eod_quotes"))
         records: list[QuoteRecord] = []
         requests = 0
         for listing in listings.rows:
-            batch = self.runtime.fetch_quotes(listing)
-            records.extend(batch.rows)
+            listing_previous = tuple(record for record in previous if record.key[:3] == listing.key)
+            last_date = _latest_date(listing_previous)
+            if not listing.is_active:
+                records.extend(listing_previous)
+                continue
+            batch = self.runtime.fetch_quotes(
+                listing,
+                last_business_date=last_date,
+                previous_records=listing_previous,
+            )
+            records.extend(_replace_quote_window(listing_previous, batch.rows, last_date))
             requests += batch.metrics.logical_requests
         self.quotes = build_quote_gold(records)
         self.runtime.persist_gold(
@@ -64,15 +74,31 @@ class _WeeklyState:
             row_count=self.quotes.row_count,
             semantic_fingerprint=self.quotes.semantic_fingerprint,
         )
+        self.runtime.persist_silver(
+            "eod_quotes",
+            [record.semantic_dict() for record in self.quotes.rows],
+        )
         return _ingest_details(self.quotes.row_count, requests, self.quotes.semantic_fingerprint)
 
     def ingest_dividends(self) -> dict[str, JSONValue]:
         listings = self._require_listings()
+        previous = _dividends_from_silver_rows(
+            _load_silver_rows(self.runtime._layout.root, "dividends")
+        )
         records: list[DividendEvent] = []
         requests = 0
         for listing in listings.rows:
-            batch = self.runtime.fetch_dividends(listing)
-            records.extend(batch.rows)
+            listing_previous = tuple(record for record in previous if record.key[:3] == listing.key)
+            last_date = _latest_date(listing_previous)
+            if not listing.is_active:
+                records.extend(listing_previous)
+                continue
+            batch = self.runtime.fetch_dividends(
+                listing,
+                last_event_date=last_date,
+                previous_records=listing_previous,
+            )
+            records.extend(_replace_action_window(listing_previous, batch.rows, last_date))
             requests += batch.metrics.logical_requests
         self.dividends = build_dividend_gold(records)
         self.runtime.persist_gold(
@@ -82,6 +108,10 @@ class _WeeklyState:
             semantic_fingerprint=self.dividends.semantic_fingerprint,
             retracted_keys=self.dividends.retracted_keys,
         )
+        self.runtime.persist_silver(
+            "dividends",
+            [_dividend_silver_row(record) for record in records],
+        )
         return _ingest_details(
             self.dividends.row_count,
             requests,
@@ -90,11 +120,21 @@ class _WeeklyState:
 
     def ingest_splits(self) -> dict[str, JSONValue]:
         listings = self._require_listings()
+        previous = _splits_from_silver_rows(_load_silver_rows(self.runtime._layout.root, "splits"))
         records: list[SplitEvent] = []
         requests = 0
         for listing in listings.rows:
-            batch = self.runtime.fetch_splits(listing)
-            records.extend(batch.rows)
+            listing_previous = tuple(record for record in previous if record.key[:3] == listing.key)
+            last_date = _latest_date(listing_previous)
+            if not listing.is_active:
+                records.extend(listing_previous)
+                continue
+            batch = self.runtime.fetch_splits(
+                listing,
+                last_event_date=last_date,
+                previous_records=listing_previous,
+            )
+            records.extend(_replace_action_window(listing_previous, batch.rows, last_date))
             requests += batch.metrics.logical_requests
         self.splits = build_split_gold(records)
         self.runtime.persist_gold(
@@ -103,6 +143,10 @@ class _WeeklyState:
             row_count=self.splits.row_count,
             semantic_fingerprint=self.splits.semantic_fingerprint,
             retracted_keys=self.splits.retracted_keys,
+        )
+        self.runtime.persist_silver(
+            "splits",
+            [_split_silver_row(record) for record in records],
         )
         return _ingest_details(self.splits.row_count, requests, self.splits.semantic_fingerprint)
 
@@ -382,6 +426,118 @@ def _quotes_from_rows(rows: list[dict[str, JSONValue]]) -> tuple[QuoteRecord, ..
         )
         for row in rows
     )
+
+
+def _load_silver_rows(root: Path, dataset: str) -> list[dict[str, JSONValue]]:
+    path = MedallionLayout(root).dataset_path(Layer.SILVER, dataset) / "data.json"
+    if not path.exists():
+        return []
+    payload = cast(JSONValue, json.loads(path.read_text(encoding="utf-8")))
+    if not isinstance(payload, list) or not all(isinstance(row, dict) for row in payload):
+        raise ValueError(f"invalid Silver data artifact for {dataset}")
+    return cast(list[dict[str, JSONValue]], payload)
+
+
+def _latest_date(
+    records: tuple[QuoteRecord, ...] | tuple[DividendEvent, ...] | tuple[SplitEvent, ...],
+) -> date | None:
+    return max(
+        (
+            record.trade_date if isinstance(record, QuoteRecord) else record.event_date
+            for record in records
+        ),
+        default=None,
+    )
+
+
+def _replace_quote_window(
+    previous: tuple[QuoteRecord, ...],
+    refreshed: tuple[QuoteRecord, ...],
+    last_date: date | None,
+) -> tuple[QuoteRecord, ...]:
+    if last_date is None:
+        return refreshed
+    start = overlap_start(last_date)
+    return tuple(record for record in previous if record.trade_date < start) + refreshed
+
+
+def _replace_action_window[T: DividendEvent | SplitEvent](
+    previous: tuple[T, ...],
+    refreshed: tuple[T, ...],
+    last_date: date | None,
+) -> tuple[T, ...]:
+    if last_date is None:
+        return refreshed
+    start = last_date - timedelta(days=7)
+    return tuple(record for record in previous if record.event_date < start) + refreshed
+
+
+def _action_status(row: Mapping[str, JSONValue]) -> ActionStatus:
+    value = row.get("status", ActionStatus.ACTIVE.value)
+    try:
+        return ActionStatus(cast(str, value))
+    except ValueError as exc:
+        raise ValueError("Gold action status is invalid") from exc
+
+
+def _dividends_from_silver_rows(rows: list[dict[str, JSONValue]]) -> tuple[DividendEvent, ...]:
+    events = tuple(
+        DividendEvent(
+            isin=_required_text(row, "isin"),
+            exchange=_required_text(row, "exchange"),
+            code=_required_text(row, "code"),
+            event_date=date.fromisoformat(_required_text(row, "event_date")),
+            value=Decimal(_required_text(row, "value")),
+            currency=_optional_text(row, "currency"),
+            period=_optional_text(row, "period"),
+            declaration_date=_optional_date(row, "declaration_date"),
+            record_date=_optional_date(row, "record_date"),
+            payment_date=_optional_date(row, "payment_date"),
+            status=_action_status(row),
+        )
+        for row in rows
+    )
+    if any(
+        _required_text(row, "event_key") != event.event_key
+        for row, event in zip(rows, events, strict=True)
+    ):
+        raise ValueError("Silver dividend event key mismatch")
+    return events
+
+
+def _splits_from_silver_rows(rows: list[dict[str, JSONValue]]) -> tuple[SplitEvent, ...]:
+    events = tuple(
+        SplitEvent(
+            isin=_required_text(row, "isin"),
+            exchange=_required_text(row, "exchange"),
+            code=_required_text(row, "code"),
+            event_date=date.fromisoformat(_required_text(row, "event_date")),
+            split_ratio=_required_text(row, "split_ratio"),
+            split_factor=_optional_decimal(row, "split_factor"),
+            status=_action_status(row),
+        )
+        for row in rows
+    )
+    if any(
+        _required_text(row, "event_key") != event.event_key
+        for row, event in zip(rows, events, strict=True)
+    ):
+        raise ValueError("Silver split event key mismatch")
+    return events
+
+
+def _dividend_silver_row(event: DividendEvent) -> dict[str, JSONValue]:
+    row = event.business_fields()
+    row["event_key"] = event.event_key
+    row["status"] = event.status.value
+    return row
+
+
+def _split_silver_row(event: SplitEvent) -> dict[str, JSONValue]:
+    row = event.business_fields()
+    row["event_key"] = event.event_key
+    row["status"] = event.status.value
+    return row
 
 
 def _dividends_from_rows(rows: list[dict[str, JSONValue]]) -> tuple[DividendEvent, ...]:
