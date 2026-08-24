@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import time
 from collections.abc import Iterable, Mapping, Sequence
@@ -163,6 +164,7 @@ class BootstrapRuntime(Protocol):
         *,
         row_count: int,
         semantic_fingerprint: str,
+        retracted_keys: Sequence[tuple[str, str, str, str]] = (),
     ) -> None: ...
 
     def publish_listings(self, gold: ListingGoldResult) -> SyncOutcome: ...
@@ -413,15 +415,27 @@ class PostgresEodhdBootstrapRuntime:
         *,
         row_count: int,
         semantic_fingerprint: str,
+        retracted_keys: Sequence[tuple[str, str, str, str]] = (),
     ) -> None:
         rows = [dict(row) for row in semantic_rows]
         self._write_layer(Layer.GOLD, dataset, cast(JSONValue, rows))
+        retractions = [list(key) for key in sorted(retracted_keys)]
+        retraction_fingerprint = hashlib.sha256(
+            canonical_json(cast(JSONValue, retractions)).encode("utf-8")
+        ).hexdigest()
+        retractions_path = self._layout.retractions_path(Layer.GOLD, dataset)
+        if dataset in {"dividends", "splits"}:
+            retractions_path.write_text(
+                canonical_json(cast(JSONValue, retractions)) + "\n",
+                encoding="utf-8",
+            )
         manifest = Manifest(
             dataset=dataset,
             layer=Layer.GOLD,
             semantic_metadata={
                 "row_count": row_count,
                 "builder_semantic_fingerprint": semantic_fingerprint,
+                "retractions_fingerprint": retraction_fingerprint,
             },
             run_metadata={},
         )

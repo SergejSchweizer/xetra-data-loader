@@ -33,6 +33,9 @@ class MedallionLayout:
     def manifest_path(self, layer: Layer, dataset: str) -> Path:
         return self.dataset_path(layer, dataset) / "manifest.json"
 
+    def retractions_path(self, layer: Layer, dataset: str) -> Path:
+        return self.dataset_path(layer, dataset) / "retractions.json"
+
 
 @dataclass(frozen=True, slots=True)
 class Manifest:

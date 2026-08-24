@@ -101,8 +101,9 @@ class FixtureRuntime:
         *,
         row_count: int,
         semantic_fingerprint: str,
+        retracted_keys: object = (),
     ) -> None:
-        del dataset, semantic_rows, row_count, semantic_fingerprint
+        del dataset, semantic_rows, row_count, semantic_fingerprint, retracted_keys
 
     def publish_listings(self, gold: object) -> SyncOutcome:
         pairs = [(tuple(row.key), row.semantic_dict()) for row in gold.rows]
