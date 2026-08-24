@@ -13,7 +13,7 @@ from uuid import uuid4
 import psycopg
 from psycopg import Connection, Cursor
 
-from xetra_loader.config import resolve_postgres_dsn
+from xetra_loader.config import resolve_postgres_admin_dsn, resolve_postgres_writer_dsn
 
 type JSONValue = str | int | float | bool | None | list[JSONValue] | dict[str, JSONValue]
 type SemanticRow = Mapping[str, JSONValue]
@@ -54,11 +54,24 @@ class SyncOutcome:
         return self.status == "applied"
 
 
-def connect_postgres(dsn: str | None = None) -> Connection[Any]:
-    """Connect using an explicit DSN, config.yaml, or the secret-only environment variable."""
+def connect_postgres(
+    dsn: str | None = None,
+    *,
+    admin: bool = False,
+    require_non_superuser: bool = False,
+) -> Connection[Any]:
+    """Connect as an explicit admin or a normal writer, rejecting unsafe weekly sessions."""
 
-    resolved = resolve_postgres_dsn(dsn)
-    return psycopg.connect(resolved, autocommit=False)
+    resolved = resolve_postgres_admin_dsn(dsn) if admin else resolve_postgres_writer_dsn(dsn)
+    connection = psycopg.connect(resolved, autocommit=False)
+    if require_non_superuser:
+        row = connection.execute(
+            "SELECT rolsuper FROM pg_roles WHERE rolname = current_user"
+        ).fetchone()
+        if row is None or bool(row[0]):
+            connection.close()
+            raise PermissionError("weekly PostgreSQL connection must not use a superuser")
+    return connection
 
 
 def semantic_fingerprint(rows: Iterable[SemanticRow]) -> tuple[str, int]:

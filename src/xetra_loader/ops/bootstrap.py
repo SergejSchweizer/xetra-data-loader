@@ -362,7 +362,17 @@ class PostgresEodhdBootstrapRuntime:
     def from_environment(cls) -> PostgresEodhdBootstrapRuntime:
         root = resolve_medallion_root()
         return cls(
-            connection=connect_postgres(),
+            connection=connect_postgres(require_non_superuser=True),
+            transport=_MeasuredTransport(),
+            medallion_root=Path(root),
+            repository_root=Path.cwd(),
+        )
+
+    @classmethod
+    def from_admin_environment(cls) -> PostgresEodhdBootstrapRuntime:
+        root = resolve_medallion_root()
+        return cls(
+            connection=connect_postgres(admin=True),
             transport=_MeasuredTransport(),
             medallion_root=Path(root),
             repository_root=Path.cwd(),
@@ -742,7 +752,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(canonical_json({"status": "BLOCKED", "reason": "confirmation-required"}))
         return 2
 
-    runtime = PostgresEodhdBootstrapRuntime.from_environment()
+    runtime = PostgresEodhdBootstrapRuntime.from_admin_environment()
     try:
         result = run_full_bootstrap(runtime, confirmed=True, reset_owned_state=True)
     finally:

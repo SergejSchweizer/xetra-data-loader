@@ -5,12 +5,10 @@ eodhd:
   api_token: "replace-with-eodhd-api-token"
 
 postgres:
-  host: "10.10.1.3"
-  port: 54321
-  user: "dbadmin"
-  password: "replace-with-postgres-password"
-  # Optional: omit to use PostgreSQL's default database for the user.
-  # database: ""
+  # Weekly publication: non-superuser xetra_data_loader_writer only.
+  writer_dsn: "postgresql://xetra_data_loader_writer:replace-writer-password@10.10.1.3:54321/postgres"
+  # Bootstrap, migrations and controlled reset only; never used by xdl-weekly.
+  admin_dsn: "postgresql://dbadmin:replace-admin-password@10.10.1.3:54321/postgres"
 
 medallion:
   root: "./lake"

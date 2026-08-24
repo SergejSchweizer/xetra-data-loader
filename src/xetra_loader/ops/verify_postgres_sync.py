@@ -239,7 +239,7 @@ def execute_production_full_sync_and_verify(
 ) -> ProductionAcceptanceReport:
     """Destructively bootstrap the real target, replay unchanged state, and verify independently."""
 
-    preflight = connect_postgres()
+    preflight = connect_postgres(admin=True)
     try:
         preflight.autocommit = True
         _, _, _, target_matches = _verify_target(preflight)
@@ -250,7 +250,7 @@ def execute_production_full_sync_and_verify(
     finally:
         preflight.close()
 
-    initial_runtime = PostgresEodhdBootstrapRuntime.from_environment()
+    initial_runtime = PostgresEodhdBootstrapRuntime.from_admin_environment()
     try:
         initial = run_full_bootstrap(initial_runtime, confirmed=True, reset_owned_state=True)
         # The bootstrap schema initializer runs after the reset transaction. Explicitly commit
@@ -259,13 +259,13 @@ def execute_production_full_sync_and_verify(
     finally:
         initial_runtime.close()
 
-    replay_runtime = PostgresEodhdBootstrapRuntime.from_environment()
+    replay_runtime = PostgresEodhdBootstrapRuntime.from_admin_environment()
     try:
         replay = run_full_bootstrap(replay_runtime, confirmed=True, reset_owned_state=False)
     finally:
         replay_runtime.close()
 
-    connection = connect_postgres()
+    connection = connect_postgres(admin=True)
     try:
         connection.autocommit = True
         connection.execute("SET TIME ZONE 'UTC'")

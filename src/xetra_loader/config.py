@@ -55,15 +55,15 @@ def resolve_eodhd_token(explicit: str | None = None) -> str:
     return token.strip()
 
 
-def resolve_postgres_dsn(explicit: str | None = None) -> str:
-    """Resolve a PostgreSQL DSN from an explicit value, env, or config.yaml."""
+def resolve_postgres_writer_dsn(explicit: str | None = None) -> str:
+    """Resolve the least-privilege weekly writer DSN without exposing its secret."""
 
-    dsn = explicit or os.getenv("XDL_POSTGRES_DSN")
+    dsn = explicit or os.getenv("XDL_POSTGRES_WRITER_DSN") or os.getenv("XDL_POSTGRES_DSN")
     if dsn and dsn.strip():
         return dsn.strip()
 
     section = _section(load_file_configuration().values, "postgres")
-    configured_dsn = _string(section, "dsn")
+    configured_dsn = _string(section, "writer_dsn") or _string(section, "dsn")
     if configured_dsn:
         return configured_dsn
 
@@ -73,10 +73,28 @@ def resolve_postgres_dsn(explicit: str | None = None) -> str:
     port = _port(section.get("port", 5432))
     database = _string(section, "database")
     if not host or not user or not password:
-        raise ValueError("XDL_POSTGRES_DSN is required")
+        raise ValueError("XDL_POSTGRES_WRITER_DSN is required")
     authority = f"{quote(user, safe='')}:{quote(password, safe='')}@{host}:{port}"
     suffix = f"/{quote(database, safe='')}" if database else ""
     return f"postgresql://{authority}{suffix}"
+
+
+def resolve_postgres_admin_dsn(explicit: str | None = None) -> str:
+    """Resolve the explicit privileged DSN used only for bootstrap and migrations."""
+
+    dsn = explicit or os.getenv("XDL_POSTGRES_ADMIN_DSN")
+    if dsn and dsn.strip():
+        return dsn.strip()
+    configured = _string(_section(load_file_configuration().values, "postgres"), "admin_dsn")
+    if configured and configured.strip():
+        return configured.strip()
+    raise ValueError("XDL_POSTGRES_ADMIN_DSN is required for bootstrap or migrations")
+
+
+def resolve_postgres_dsn(explicit: str | None = None) -> str:
+    """Backward-compatible alias for the normal least-privilege writer resolver."""
+
+    return resolve_postgres_writer_dsn(explicit)
 
 
 def resolve_medallion_root(explicit: str | None = None) -> str:
