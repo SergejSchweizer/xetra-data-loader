@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any, Protocol, cast
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from psycopg import Connection
@@ -28,7 +29,14 @@ from xetra_loader.ingestion.dividends import ingest_dividends
 from xetra_loader.ingestion.listings import ingest_xetra_listings
 from xetra_loader.ingestion.quotes import ingest_quotes
 from xetra_loader.ingestion.splits import ingest_splits
-from xetra_loader.medallion.core import Layer, Manifest, MedallionLayout, canonical_json
+from xetra_loader.medallion.core import (
+    Layer,
+    Manifest,
+    MedallionLayout,
+    atomic_write,
+    atomic_write_text,
+    canonical_json,
+)
 from xetra_loader.ops.reset import build_reset_plan, execute_reset
 from xetra_loader.sync import connect_postgres
 from xetra_loader.sync.core import SyncOutcome
@@ -333,16 +341,6 @@ class PostgresEodhdBootstrapRuntime:
         self._transport = transport
         self._layout = MedallionLayout(medallion_root.resolve())
         self._repository_root = repository_root.resolve()
-        self._bronze_series: dict[str, list[dict[str, JSONValue]]] = {
-            "eod_quotes": [],
-            "dividends": [],
-            "splits": [],
-        }
-        self._silver_series: dict[str, list[dict[str, JSONValue]]] = {
-            "eod_quotes": [],
-            "dividends": [],
-            "splits": [],
-        }
 
     @classmethod
     def from_environment(cls) -> PostgresEodhdBootstrapRuntime:
@@ -362,8 +360,6 @@ class PostgresEodhdBootstrapRuntime:
             connection=self._connection,
         )
         self._initialize_database()
-        self._bronze_series = {"eod_quotes": [], "dividends": [], "splits": []}
-        self._silver_series = {"eod_quotes": [], "dividends": [], "splits": []}
 
     def fetch_listings(self) -> FetchBatch[ListingRecord]:
         before = self._measurement_start()
@@ -379,33 +375,39 @@ class PostgresEodhdBootstrapRuntime:
         before = self._measurement_start()
         result = ingest_quotes(self._transport, listing)
         metrics = self._measurement_finish(before, len(result.silver_records))
-        self._record_series_bronze("eod_quotes", listing, result.bronze_payload)
-        self._silver_series["eod_quotes"].extend(
-            record.semantic_dict() for record in result.silver_records
+        self._record_partition_bronze("eod_quotes", listing, result.bronze_payload)
+        self._write_partition(
+            Layer.SILVER,
+            "eod_quotes",
+            listing,
+            [record.semantic_dict() for record in result.silver_records],
         )
-        self._flush_series("eod_quotes")
         return FetchBatch(result.silver_records, metrics)
 
     def fetch_dividends(self, listing: ListingRecord) -> FetchBatch[DividendEvent]:
         before = self._measurement_start()
         result = ingest_dividends(self._transport, listing)
         metrics = self._measurement_finish(before, len(result.silver_records))
-        self._record_series_bronze("dividends", listing, result.bronze_payload)
-        self._silver_series["dividends"].extend(
-            _dividend_silver(event) for event in result.silver_records
+        self._record_partition_bronze("dividends", listing, result.bronze_payload)
+        self._write_partition(
+            Layer.SILVER,
+            "dividends",
+            listing,
+            [_dividend_silver(event) for event in result.silver_records],
         )
-        self._flush_series("dividends")
         return FetchBatch(result.silver_records, metrics)
 
     def fetch_splits(self, listing: ListingRecord) -> FetchBatch[SplitEvent]:
         before = self._measurement_start()
         result = ingest_splits(self._transport, listing)
         metrics = self._measurement_finish(before, len(result.silver_records))
-        self._record_series_bronze("splits", listing, result.bronze_payload)
-        self._silver_series["splits"].extend(
-            _split_silver(event) for event in result.silver_records
+        self._record_partition_bronze("splits", listing, result.bronze_payload)
+        self._write_partition(
+            Layer.SILVER,
+            "splits",
+            listing,
+            [_split_silver(event) for event in result.silver_records],
         )
-        self._flush_series("splits")
         return FetchBatch(result.silver_records, metrics)
 
     def persist_gold(
@@ -417,6 +419,8 @@ class PostgresEodhdBootstrapRuntime:
         semantic_fingerprint: str,
         retracted_keys: Sequence[tuple[str, str, str, str]] = (),
     ) -> None:
+        if dataset in {"eod_quotes", "dividends", "splits"}:
+            self._finalize_partitions(dataset)
         rows = [dict(row) for row in semantic_rows]
         self._write_layer(Layer.GOLD, dataset, cast(JSONValue, rows))
         retractions = [list(key) for key in sorted(retracted_keys)]
@@ -439,8 +443,10 @@ class PostgresEodhdBootstrapRuntime:
             },
             run_metadata={},
         )
-        path = self._layout.manifest_path(Layer.GOLD, dataset)
-        path.write_text(manifest.to_json() + "\n", encoding="utf-8")
+        atomic_write_text(
+            self._layout.manifest_path(Layer.GOLD, dataset),
+            manifest.to_json() + "\n",
+        )
 
     def publish_listings(self, gold: ListingGoldResult) -> SyncOutcome:
         return sync_listings(self._connection, gold)
@@ -543,35 +549,48 @@ class PostgresEodhdBootstrapRuntime:
             rows=row_count,
         )
 
-    def _record_series_bronze(
+    def _record_partition_bronze(
         self,
         dataset: str,
         listing: ListingRecord,
         bronze_payload: str,
     ) -> None:
         payload = cast(JSONValue, json.loads(bronze_payload))
-        self._bronze_series[dataset].append(
-            {
-                "isin": listing.isin,
-                "exchange": listing.exchange,
-                "code": listing.code,
-                "payload": payload,
-            }
+        self._write_partition(
+            Layer.BRONZE,
+            dataset,
+            listing,
+            [
+                {
+                    "isin": listing.isin,
+                    "exchange": listing.exchange,
+                    "code": listing.code,
+                    "payload": payload,
+                }
+            ],
         )
 
-    def _flush_series(self, dataset: str) -> None:
-        bronze = sorted(self._bronze_series[dataset], key=canonical_json)
-        silver = sorted(self._silver_series[dataset], key=canonical_json)
-        self._write_layer(Layer.BRONZE, dataset, cast(JSONValue, bronze))
-        self._write_layer(Layer.SILVER, dataset, cast(JSONValue, silver))
+    def _write_partition(
+        self,
+        layer: Layer,
+        dataset: str,
+        listing: ListingRecord,
+        rows: list[dict[str, JSONValue]],
+    ) -> None:
+        path = self._layout.partition_path(layer, dataset, _partition_name(listing))
+        content = canonical_json(cast(JSONValue, sorted(rows, key=canonical_json))) + "\n"
+        atomic_write_text(path, content)
+
+    def _finalize_partitions(self, dataset: str) -> None:
+        for layer in (Layer.BRONZE, Layer.SILVER):
+            directory = self._layout.dataset_path(layer, dataset) / "partitions"
+            partitions = sorted(directory.glob("*.json")) if directory.exists() else []
+            target = self._layout.dataset_path(layer, dataset) / "data.json"
+            _stream_partitions_to_json_array(partitions, target)
 
     def _write_layer(self, layer: Layer, dataset: str, payload: JSONValue) -> None:
         directory = self._layout.dataset_path(layer, dataset)
-        directory.mkdir(parents=True, exist_ok=True)
-        (directory / "data.json").write_text(
-            canonical_json(payload) + "\n",
-            encoding="utf-8",
-        )
+        atomic_write_text(directory / "data.json", canonical_json(payload) + "\n")
 
     def _count(self, table: str) -> int:
         row = self._connection.execute(
@@ -618,6 +637,34 @@ def _split_silver(event: SplitEvent) -> dict[str, JSONValue]:
     row["event_key"] = event.event_key
     row["status"] = event.status.value
     return row
+
+
+def _partition_name(listing: ListingRecord) -> str:
+    """Return a deterministic, path-safe identity partition ordered by listing key."""
+
+    return "!".join(
+        quote(value, safe="") for value in (listing.code, listing.exchange, listing.isin)
+    )
+
+
+def _stream_partitions_to_json_array(partitions: Sequence[Path], target: Path) -> None:
+    """Flatten already-bounded listing partitions without retaining the full universe."""
+
+    def write(handle: Any) -> None:
+        handle.write("[")
+        first = True
+        for partition in partitions:
+            payload = cast(JSONValue, json.loads(partition.read_text(encoding="utf-8")))
+            if not isinstance(payload, list):
+                raise ValueError(f"invalid medallion partition: {partition}")
+            for row in payload:
+                if not first:
+                    handle.write(",")
+                handle.write(canonical_json(row))
+                first = False
+        handle.write("]\n")
+
+    atomic_write(target, write)
 
 
 def _bounds(values: Iterable[date]) -> tuple[date | None, date | None]:
