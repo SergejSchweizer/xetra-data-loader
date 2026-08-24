@@ -10,6 +10,7 @@ from xetra_loader.gold.dividends import DividendGoldResult, build_dividend_gold
 from xetra_loader.gold.listings import ListingGoldResult, build_listing_gold
 from xetra_loader.gold.quotes import QuoteGoldResult, build_quote_gold
 from xetra_loader.gold.splits import SplitGoldResult, build_split_gold
+from xetra_loader.gold.validation import validate_complete_gold
 from xetra_loader.ops.bootstrap import PostgresEodhdBootstrapRuntime
 from xetra_loader.pipeline.orchestrator import PipelineStages
 from xetra_loader.sync.core import JSONValue, SyncOutcome
@@ -88,12 +89,7 @@ class _WeeklyState:
 
     def validate_gold(self) -> dict[str, JSONValue]:
         listings, quotes, dividends, splits = self._require_gold()
-        return {
-            "listings": listings.row_count,
-            "eod_quotes": quotes.row_count,
-            "dividends": dividends.row_count,
-            "splits": splits.row_count,
-        }
+        return validate_complete_gold(listings, quotes, dividends, splits).as_dict()
 
     def sync_listings(self) -> dict[str, JSONValue]:
         outcome = self.runtime.publish_listings(self._require_listings())
