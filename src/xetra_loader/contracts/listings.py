@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import cast
 
 type JSONValue = str | int | float | bool | None | list[JSONValue] | dict[str, JSONValue]
@@ -21,6 +21,7 @@ class ListingRecord:
     instrument_type: str | None = None
     currency: str | None = None
     country: str | None = None
+    is_active: bool = True
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -35,10 +36,15 @@ class ListingRecord:
             "instrument_type": self.instrument_type,
             "currency": self.currency,
             "country": self.country,
+            "is_active": self.is_active,
         }
 
 
-def normalize_listing(provider_row: Mapping[str, object]) -> ListingRecord | None:
+def normalize_listing(
+    provider_row: Mapping[str, object],
+    *,
+    is_active: bool = True,
+) -> ListingRecord | None:
     """Normalize one EODHD listing; only a missing/empty ISIN causes exclusion."""
 
     isin = _optional_text(provider_row.get("ISIN"))
@@ -56,13 +62,22 @@ def normalize_listing(provider_row: Mapping[str, object]) -> ListingRecord | Non
         instrument_type=_optional_text(provider_row.get("Type")),
         currency=_optional_text(provider_row.get("Currency")),
         country=_optional_text(provider_row.get("Country")),
+        is_active=is_active,
     )
 
 
-def normalize_listings(provider_rows: Iterable[Mapping[str, object]]) -> tuple[ListingRecord, ...]:
+def normalize_listings(
+    provider_rows: Iterable[Mapping[str, object]],
+    *,
+    is_active: bool = True,
+) -> tuple[ListingRecord, ...]:
     """Normalize and deterministically order the complete retained listing universe."""
 
-    records = [record for row in provider_rows if (record := normalize_listing(row)) is not None]
+    records = [
+        record
+        for row in provider_rows
+        if (record := normalize_listing(row, is_active=is_active)) is not None
+    ]
     return tuple(sorted(records, key=lambda record: record.key))
 
 
@@ -91,6 +106,7 @@ def deserialize_listings(payload: str) -> tuple[ListingRecord, ...]:
             instrument_type=_decoded_optional(row, "instrument_type"),
             currency=_decoded_optional(row, "currency"),
             country=_decoded_optional(row, "country"),
+            is_active=_decoded_active(row),
         )
         for row in decoded
     )
@@ -125,3 +141,25 @@ def _decoded_optional(row: Mapping[str, JSONValue], key: str) -> str | None:
     if not isinstance(value, str):
         raise ValueError(f"serialized listing field {key} must be text or null")
     return value
+
+
+def _decoded_active(row: Mapping[str, JSONValue]) -> bool:
+    value = row.get("is_active", True)
+    if not isinstance(value, bool):
+        raise ValueError("serialized listing field is_active must be boolean")
+    return value
+
+
+def merge_listing_lifecycle(
+    active: Iterable[ListingRecord],
+    delisted: Iterable[ListingRecord],
+    previous_records: Iterable[ListingRecord] = (),
+) -> tuple[ListingRecord, ...]:
+    """Merge active and delisted provider views while retaining vanished identities inactive."""
+
+    merged = {record.key: replace(record, is_active=True) for record in active}
+    for record in delisted:
+        merged.setdefault(record.key, replace(record, is_active=False))
+    for record in previous_records:
+        merged.setdefault(record.key, replace(record, is_active=False))
+    return tuple(sorted(merged.values(), key=lambda record: record.key))
