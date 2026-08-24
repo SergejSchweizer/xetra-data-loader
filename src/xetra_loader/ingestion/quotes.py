@@ -86,18 +86,36 @@ def ingest_quotes(
 
 def _normalize_quote(listing: ListingRecord, row: Mapping[str, JSONValue]) -> QuoteRecord:
     trade_date = date.fromisoformat(_required_text(row, "date"))
+    open_price = _decimal(row.get("open"))
+    high = _decimal(row.get("high"))
+    low = _decimal(row.get("low"))
+    close = _required_decimal(row, "close")
+    open_price, high, low = _missing_ohlc_sentinel(open_price, high, low, close)
     return QuoteRecord(
         isin=listing.isin,
         exchange=listing.exchange,
         code=listing.code,
         trade_date=trade_date,
-        open=_decimal(row.get("open")),
-        high=_decimal(row.get("high")),
-        low=_decimal(row.get("low")),
-        close=_required_decimal(row, "close"),
+        open=open_price,
+        high=high,
+        low=low,
+        close=close,
         adjusted_close=_decimal(row.get("adjusted_close", row.get("adjustedClose"))),
         volume=_integer(row.get("volume")),
     )
+
+
+def _missing_ohlc_sentinel(
+    open_price: Decimal | None,
+    high: Decimal | None,
+    low: Decimal | None,
+    close: Decimal,
+) -> tuple[Decimal | None, Decimal | None, Decimal | None]:
+    """Map EODHD's all-zero missing-OHLC sentinel without masking bad prices."""
+
+    if open_price == high == low == Decimal(0) and close > 0:
+        return None, None, None
+    return open_price, high, low
 
 
 def _required_text(row: Mapping[str, JSONValue], key: str) -> str:

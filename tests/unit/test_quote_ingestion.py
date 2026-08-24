@@ -96,3 +96,18 @@ def test_new_date_is_exactly_one_new_key() -> None:
     )
     assert updated.corrected_keys == ()
     assert updated.inserted_keys == (("DE0000000001", "XETRA", "AAA", date(2026, 8, 22)),)
+
+
+def test_all_zero_ohlc_with_valid_close_is_a_missing_provider_sentinel() -> None:
+    payload = _payload()
+    row = payload[0]
+    assert isinstance(row, dict)
+    row.update({"open": 0, "high": 0, "low": 0, "close": 20.15})
+
+    result = ingest_quotes(FixtureTransport(payload), _listing())
+
+    quote = result.silver_records[0]
+    assert quote.open is None
+    assert quote.high is None
+    assert quote.low is None
+    assert str(quote.close) == "20.15"
