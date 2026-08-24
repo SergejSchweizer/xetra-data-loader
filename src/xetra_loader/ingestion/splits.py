@@ -11,6 +11,7 @@ from typing import Protocol
 
 from xetra_loader.contracts.corporate_actions import ActionStatus, SplitEvent, retract_split
 from xetra_loader.contracts.listings import ListingRecord
+from xetra_loader.contracts.numeric import provider_decimal
 
 type JSONValue = str | int | float | bool | None | list[JSONValue] | dict[str, JSONValue]
 
@@ -83,6 +84,7 @@ def ingest_splits(
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
+            default=str,
         ),
         silver_records=tuple(reconciled),
         correction_count=corrections,
@@ -120,17 +122,15 @@ def _required_text(row: Mapping[str, JSONValue], key: str) -> str:
 
 def _split_factor(value: JSONValue, ratio: str) -> Decimal | None:
     if value is not None and value != "":
-        if isinstance(value, (bool, list, dict)):
-            raise ValueError("split factor must be numeric")
-        return Decimal(str(value))
+        return provider_decimal(value, field="split factor")
     if ":" not in ratio:
         return None
     numerator, denominator = ratio.split(":", 1)
-    denominator_decimal = Decimal(denominator.strip())
+    denominator_decimal = provider_decimal(denominator.strip(), field="split ratio denominator")
     if denominator_decimal == 0:
         raise ValueError("split ratio denominator must not be zero")
-    return Decimal(numerator.strip()) / denominator_decimal
+    return provider_decimal(numerator.strip(), field="split ratio numerator") / denominator_decimal
 
 
 def _canonical_row(row: dict[str, JSONValue]) -> str:
-    return json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)

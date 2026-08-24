@@ -1,3 +1,4 @@
+from decimal import Decimal
 from email.message import Message
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
@@ -41,6 +42,16 @@ def test_typed_get_uses_fixture_seam() -> None:
         "rows": 2,
     }
     assert "api_token=top-secret" in seen[0]
+
+
+def test_transport_decodes_provider_decimals_without_binary_float_round_trip() -> None:
+    def opener(request: Request, timeout: float) -> FakeResponse:
+        del request, timeout
+        return FakeResponse(b'[{"value":1.0000000000000000001}]')
+
+    payload = EodhdTransport(token="secret", opener=opener).get_json("div/AAA.XETRA")
+    assert isinstance(payload, list)
+    assert payload == [{"value": Decimal("1.0000000000000000001")}]
 
 
 def test_network_retries_are_bounded() -> None:

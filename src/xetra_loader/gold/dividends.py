@@ -8,6 +8,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from xetra_loader.contracts.corporate_actions import ActionStatus, DividendEvent
+from xetra_loader.contracts.numeric import canonical_decimal
 
 type JSONValue = str | int | float | bool | None | list[JSONValue] | dict[str, JSONValue]
 
@@ -73,7 +74,7 @@ def _serving_row(event: DividendEvent) -> dict[str, JSONValue]:
         "declaration_date": _date_text(event.declaration_date),
         "record_date": _date_text(event.record_date),
         "payment_date": _date_text(event.payment_date),
-        "value": str(event.value),
+        "value": canonical_decimal(event.value),
         "currency": event.currency,
         "period": event.period,
     }
