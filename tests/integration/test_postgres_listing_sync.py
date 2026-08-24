@@ -64,7 +64,15 @@ def test_listing_sync_initial_replay_and_one_update() -> None:
         assert replay.counters.total_mutations == 0
 
         changed_gold = build_listing_gold(
-            [ListingRecord("DE0000000001", "XETRA", "AAA", name="Changed")]
+            [
+                ListingRecord(
+                    "DE0000000001",
+                    "XETRA",
+                    "AAA",
+                    name="Changed",
+                    is_active=False,
+                )
+            ]
         )
         changed = sync_listings(
             connection,
@@ -74,7 +82,35 @@ def test_listing_sync_initial_replay_and_one_update() -> None:
         )
         assert changed.counters.updated == 1
         assert connection.execute(
-            "SELECT name FROM xetra_loader.listings WHERE code = 'AAA'"
-        ).fetchone() == ("Changed",)
+            "SELECT name, is_active FROM xetra_loader.listings WHERE code = 'AAA'"
+        ).fetchone() == ("Changed", False)
+    finally:
+        connection.close()
+
+
+def test_listing_lifecycle_migration_backfills_existing_rows() -> None:
+    if DSN is None:
+        pytest.skip("XDL_TEST_POSTGRES_DSN is not configured")
+    _apply_sql("sql/schema/001_xetra_loader.sql")
+    connection = connect_postgres(DSN)
+    try:
+        with connection.transaction():
+            connection.execute("TRUNCATE xetra_loader.listings CASCADE")
+            connection.execute("ALTER TABLE xetra_loader.listings DROP COLUMN is_active")
+            connection.execute(
+                "INSERT INTO xetra_loader.listings "
+                "(isin, exchange, code, fetched_at_utc, published_at_utc) "
+                "VALUES ('DE0000000001', 'XETRA', 'AAA', now(), now())"
+            )
+
+        _apply_sql("sql/schema/003_listing_lifecycle.sql")
+        assert connection.execute(
+            "SELECT is_active FROM xetra_loader.listings WHERE code = 'AAA'"
+        ).fetchone() == (True,)
+        assert connection.execute(
+            "SELECT is_nullable, column_default FROM information_schema.columns "
+            "WHERE table_schema = 'xetra_loader' AND table_name = 'listings' "
+            "AND column_name = 'is_active'"
+        ).fetchone() == ("NO", "true")
     finally:
         connection.close()

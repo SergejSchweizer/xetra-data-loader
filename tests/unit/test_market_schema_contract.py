@@ -13,6 +13,7 @@ def test_schema_freezes_serving_tables_and_keys() -> None:
     assert "PRIMARY KEY (isin, exchange, code)" in sql
     assert "PRIMARY KEY (isin, exchange, code, trade_date)" in sql
     assert sql.count("PRIMARY KEY (isin, exchange, code, event_key)") == 2
+    assert "is_active BOOLEAN NOT NULL DEFAULT TRUE" in sql
 
 
 def test_schema_uses_exact_timestamp_and_date_contract() -> None:
