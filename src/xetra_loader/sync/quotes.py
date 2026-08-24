@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any, cast
 
@@ -36,6 +36,8 @@ def sync_quotes(
     def mutate(cursor: Cursor[Any]) -> SyncCounters:
         inserted = 0
         updated = 0
+        deleted = 0
+        expected_keys = {row.key for row in gold.rows}
         for row in gold.rows:
             cursor.execute(
                 "SELECT open, high, low, close, adjusted_close, volume "
@@ -82,7 +84,19 @@ def sync_quotes(
                     ),
                 )
                 updated += 1
-        return SyncCounters(inserted=inserted, updated=updated)
+        existing_keys = cursor.execute(
+            "SELECT isin, exchange, code, trade_date FROM xetra_loader.eod_quotes"
+        ).fetchall()
+        for key in existing_keys:
+            normalized = cast(tuple[str, str, str, date], key)
+            if normalized not in expected_keys:
+                cursor.execute(
+                    "DELETE FROM xetra_loader.eod_quotes "
+                    "WHERE isin = %s AND exchange = %s AND code = %s AND trade_date = %s",
+                    normalized,
+                )
+                deleted += cursor.rowcount
+        return SyncCounters(inserted=inserted, updated=updated, deleted=deleted)
 
     return run_sync(
         connection,

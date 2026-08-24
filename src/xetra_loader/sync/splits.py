@@ -39,6 +39,7 @@ def sync_splits(
         inserted = 0
         updated = 0
         retracted = 0
+        expected_keys = {event.key for event in gold.rows}
         for key in gold.retracted_keys:
             cursor.execute(
                 "DELETE FROM xetra_loader.splits "
@@ -76,6 +77,18 @@ def sync_splits(
                     (*semantic, published_at, published_at, *event.key),
                 )
                 updated += 1
+        existing_keys = cursor.execute(
+            "SELECT isin, exchange, code, event_key FROM xetra_loader.splits"
+        ).fetchall()
+        for key in existing_keys:
+            normalized = cast(tuple[str, str, str, str], key)
+            if normalized not in expected_keys:
+                cursor.execute(
+                    "DELETE FROM xetra_loader.splits "
+                    "WHERE isin = %s AND exchange = %s AND code = %s AND event_key = %s",
+                    normalized,
+                )
+                retracted += cursor.rowcount
         return SyncCounters(inserted=inserted, updated=updated, retracted=retracted)
 
     return run_sync(

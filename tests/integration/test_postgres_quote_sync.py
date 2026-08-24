@@ -97,9 +97,16 @@ def test_quote_sync_initial_replay_correction_and_new_date() -> None:
         )
         assert extended.counters.inserted == 1
         assert extended.counters.updated == 0
-        quote_count = connection.execute(
-            "SELECT count(*) FROM xetra_loader.eod_quotes"
-        ).fetchone()
+        quote_count = connection.execute("SELECT count(*) FROM xetra_loader.eod_quotes").fetchone()
         assert quote_count == (2,)
+
+        removed = sync_quotes(
+            connection,
+            build_quote_gold([_quote(22, "11")]),
+            run_id="quote-delete",
+            published_at_utc=published,
+        )
+        assert removed.counters.deleted == 1
+        assert connection.execute("SELECT count(*) FROM xetra_loader.eod_quotes").fetchone() == (1,)
     finally:
         connection.close()
