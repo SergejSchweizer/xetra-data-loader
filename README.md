@@ -24,7 +24,7 @@ existing loader data while renaming the role to `xetra-loader` and the schemas t
 
 ## Local secrets
 
-Copy `config.example.yaml` to `config.yaml` and fill in the EODHD token and PostgreSQL credentials. The loader reads this file for bootstrap and database connections; `config.yaml` is ignored by Git and must remain local. Environment variables (`EODHD_API_TOKEN`, `XDL_POSTGRES_DSN`, and `XDL_MEDALLION_ROOT`) still override the corresponding file values.
+Copy `config.example.yaml` to `config.yaml` and fill in the EODHD token plus separate PostgreSQL writer and admin credentials. `postgres.writer_dsn` (or `XDL_POSTGRES_WRITER_DSN`) is used by the weekly runner and must authenticate as the non-superuser `xetra_data_loader_writer`; the runner rejects superuser sessions. `postgres.admin_dsn` (or `XDL_POSTGRES_ADMIN_DSN`) is required only for schema provisioning, migration, reset, and the controlled full bootstrap. The loader reads this ignored local file; never commit it. `EODHD_API_TOKEN` and `XDL_MEDALLION_ROOT` can still be provided through the environment.
 
 ## Current scope
 

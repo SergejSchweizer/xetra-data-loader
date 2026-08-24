@@ -29,9 +29,10 @@ CREATE TABLE IF NOT EXISTS xetra_loader_sync.loader_runs (
 
 REVOKE ALL ON SCHEMA xetra_loader_sync FROM PUBLIC;
 REVOKE ALL ON ALL TABLES IN SCHEMA xetra_loader_sync FROM PUBLIC;
-GRANT USAGE, CREATE ON SCHEMA xetra_loader_sync TO "xetra-loader";
+GRANT USAGE ON SCHEMA xetra_loader_sync TO "xetra-data-loader";
+REVOKE CREATE ON SCHEMA xetra_loader_sync FROM "xetra-data-loader";
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA xetra_loader_sync
-    TO "xetra-loader";
+    TO "xetra-data-loader";
 REVOKE ALL ON SCHEMA xetra_loader_sync FROM portfell_app;
 REVOKE ALL ON ALL TABLES IN SCHEMA xetra_loader_sync FROM portfell_app;
 

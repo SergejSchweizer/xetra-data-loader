@@ -79,7 +79,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("paths=" + ",".join(str(path) for path in plan.medallion_paths))
     if not args.confirmed or args.dry_run:
         return 0
-    connection = connect_postgres()
+    connection = connect_postgres(admin=True)
     try:
         execute_reset(plan, confirmed=True, dry_run=False, connection=connection)
     finally:

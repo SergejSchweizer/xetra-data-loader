@@ -34,13 +34,31 @@ def test_writer_and_read_only_grants() -> None:
     privileges = _psql(
         "-At",
         "-c",
-        "SELECT has_table_privilege('xetra-loader', "
+        "SELECT has_table_privilege('xetra-data-loader', "
         "'xetra_loader.listings', 'INSERT,UPDATE,DELETE'), "
+        "pg_has_role('xetra_data_loader_writer', 'xetra-data-loader', 'member'), "
+        "(SELECT NOT rolsuper FROM pg_roles WHERE rolname = 'xetra_data_loader_writer'), "
         "has_table_privilege('portfell_app', 'xetra_loader.listings', 'SELECT'), "
         "has_table_privilege('portfell_app', 'xetra_loader.listings', 'INSERT,UPDATE,DELETE'), "
         "has_schema_privilege('portfell_app', 'xetra_loader', 'CREATE')",
     ).stdout.strip()
-    assert privileges == "t|t|f|f"
+    assert privileges == "t|t|t|t|f|f"
+
+    writer = _psql(
+        "-c",
+        "SET ROLE xetra_data_loader_writer; "
+        "INSERT INTO xetra_loader.listings "
+        "(isin, exchange, code, fetched_at_utc, published_at_utc) "
+        "VALUES ('DE0000000002', 'XETRA', 'BBB', now(), now())",
+    )
+    assert writer.returncode == 0
+
+    writer_ddl = _psql(
+        "-c",
+        "SET ROLE xetra_data_loader_writer; CREATE TABLE xetra_loader.forbidden (id INT)",
+        check=False,
+    )
+    assert writer_ddl.returncode != 0
 
     forbidden = _psql(
         "-c",
