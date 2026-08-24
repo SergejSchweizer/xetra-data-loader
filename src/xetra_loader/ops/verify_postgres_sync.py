@@ -354,8 +354,19 @@ def execute_production_full_sync_and_verify(
         runtime = _AdminResetWriterPublishRuntime(
             PostgresEodhdBootstrapRuntime.from_admin_environment(quarantine_invalid_ohlc=True)
         )
+        def worker_runtime() -> PostgresEodhdBootstrapRuntime:
+            return PostgresEodhdBootstrapRuntime.from_admin_environment(
+                quarantine_invalid_ohlc=True
+            )
+
         try:
-            initial = run_full_bootstrap(runtime, confirmed=True, reset_owned_state=True)
+            initial = run_full_bootstrap(
+                runtime,
+                confirmed=True,
+                reset_owned_state=True,
+                parallel_runtime_factory=worker_runtime,
+                max_workers=4,
+            )
         finally:
             runtime.close()
 
