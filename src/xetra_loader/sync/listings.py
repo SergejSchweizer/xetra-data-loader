@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -17,6 +18,7 @@ def sync_listings(
     *,
     run_id: str | None = None,
     published_at_utc: datetime | None = None,
+    fetched_at_by_key: Mapping[tuple[str, str, str], datetime] | None = None,
 ) -> SyncOutcome:
     """Insert/update listing rows while preserving semantic no-op behavior."""
 
@@ -27,6 +29,7 @@ def sync_listings(
         inserted = 0
         updated = 0
         for row in gold.rows:
+            fetched_at = _fetched_at(row.key, fetched_at_by_key, published_at)
             cursor.execute(
                 "SELECT name, instrument_type, currency, country, is_active "
                 "FROM xetra_loader.listings "
@@ -50,7 +53,7 @@ def sync_listings(
                     "(isin, exchange, code, name, instrument_type, currency, country, is_active, "
                     "fetched_at_utc, published_at_utc) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                    (*row.key, *semantic, published_at, published_at),
+                    (*row.key, *semantic, fetched_at, published_at),
                 )
                 inserted += 1
             elif existing != semantic:
@@ -59,7 +62,7 @@ def sync_listings(
                     "currency = %s, country = %s, is_active = %s, fetched_at_utc = %s, "
                     "published_at_utc = %s "
                     "WHERE isin = %s AND exchange = %s AND code = %s",
-                    (*semantic, published_at, published_at, *row.key),
+                    (*semantic, fetched_at, published_at, *row.key),
                 )
                 updated += 1
         return SyncCounters(inserted=inserted, updated=updated)
@@ -77,3 +80,15 @@ def _require_utc(value: datetime) -> None:
     offset = value.utcoffset()
     if value.tzinfo is None or offset is None or offset != UTC.utcoffset(value):
         raise ValueError("published_at_utc must be timezone-aware UTC")
+
+
+def _fetched_at(
+    key: tuple[str, str, str],
+    values: Mapping[tuple[str, str, str], datetime] | None,
+    published_at: datetime,
+) -> datetime:
+    value = published_at if values is None else values.get(key, published_at)
+    _require_utc(value)
+    if value > published_at:
+        raise ValueError("fetched_at_utc must not be after published_at_utc")
+    return value

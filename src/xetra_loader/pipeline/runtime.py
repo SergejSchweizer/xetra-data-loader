@@ -6,13 +6,13 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import cast
 
 from xetra_loader.contracts.corporate_actions import ActionStatus, DividendEvent, SplitEvent
-from xetra_loader.contracts.listings import deserialize_listings
+from xetra_loader.contracts.listings import ListingRecord, deserialize_listings
 from xetra_loader.contracts.quotes import QuoteRecord, overlap_start
 from xetra_loader.gold.dividends import DividendGoldResult, build_dividend_gold
 from xetra_loader.gold.listings import ListingGoldResult, build_listing_gold
@@ -34,9 +34,11 @@ class _WeeklyState:
     splits: SplitGoldResult | None = None
     outcomes: dict[str, SyncOutcome] = field(default_factory=dict)
     action_changed_listings: set[tuple[str, str, str]] = field(default_factory=set)
+    fetched_at_by_dataset: dict[str, dict[object, datetime]] = field(default_factory=dict)
 
     def ingest_listings(self) -> dict[str, JSONValue]:
         batch = self.runtime.fetch_listings()
+        self._record_fetch_times("listings", batch.rows, batch.fetched_at_utc)
         self.listings = build_listing_gold(batch.rows)
         self.runtime.persist_gold(
             "listings",
@@ -44,10 +46,13 @@ class _WeeklyState:
             row_count=self.listings.row_count,
             semantic_fingerprint=self.listings.semantic_fingerprint,
         )
-        return _ingest_details(
-            self.listings.row_count,
-            batch.metrics.logical_requests,
-            self.listings.semantic_fingerprint,
+        return self._with_fetch_provenance(
+            "listings",
+            _ingest_details(
+                self.listings.row_count,
+                batch.metrics.logical_requests,
+                self.listings.semantic_fingerprint,
+            ),
         )
 
     def ingest_quotes(self) -> dict[str, JSONValue]:
@@ -74,6 +79,7 @@ class _WeeklyState:
                     None if action_changed else last_date,
                 )
             )
+            self._record_fetch_times("eod_quotes", batch.rows, batch.fetched_at_utc)
             requests += batch.metrics.logical_requests
         self.quotes = build_quote_gold(records)
         self.runtime.persist_gold(
@@ -86,7 +92,10 @@ class _WeeklyState:
             "eod_quotes",
             [record.semantic_dict() for record in self.quotes.rows],
         )
-        return _ingest_details(self.quotes.row_count, requests, self.quotes.semantic_fingerprint)
+        return self._with_fetch_provenance(
+            "eod_quotes",
+            _ingest_details(self.quotes.row_count, requests, self.quotes.semantic_fingerprint),
+        )
 
     def ingest_dividends(self) -> dict[str, JSONValue]:
         listings = self._require_listings()
@@ -110,6 +119,7 @@ class _WeeklyState:
             if _action_set_changed(listing_previous, merged):
                 self.action_changed_listings.add(listing.key)
             records.extend(merged)
+            self._record_fetch_times("dividends", batch.rows, batch.fetched_at_utc)
             requests += batch.metrics.logical_requests
         self.dividends = build_dividend_gold(records)
         self.runtime.persist_gold(
@@ -123,10 +133,13 @@ class _WeeklyState:
             "dividends",
             [_dividend_silver_row(record) for record in records],
         )
-        details = _ingest_details(
-            self.dividends.row_count,
-            requests,
-            self.dividends.semantic_fingerprint,
+        details = self._with_fetch_provenance(
+            "dividends",
+            _ingest_details(
+                self.dividends.row_count,
+                requests,
+                self.dividends.semantic_fingerprint,
+            ),
         )
         details["changed_listing_keys"] = _changed_listing_keys(self.action_changed_listings)
         return details
@@ -151,6 +164,7 @@ class _WeeklyState:
             if _action_set_changed(listing_previous, merged):
                 self.action_changed_listings.add(listing.key)
             records.extend(merged)
+            self._record_fetch_times("splits", batch.rows, batch.fetched_at_utc)
             requests += batch.metrics.logical_requests
         self.splits = build_split_gold(records)
         self.runtime.persist_gold(
@@ -164,7 +178,10 @@ class _WeeklyState:
             "splits",
             [_split_silver_row(record) for record in records],
         )
-        details = _ingest_details(self.splits.row_count, requests, self.splits.semantic_fingerprint)
+        details = self._with_fetch_provenance(
+            "splits",
+            _ingest_details(self.splits.row_count, requests, self.splits.semantic_fingerprint),
+        )
         details["changed_listing_keys"] = _changed_listing_keys(self.action_changed_listings)
         return details
 
@@ -173,22 +190,46 @@ class _WeeklyState:
         return validate_complete_gold(listings, quotes, dividends, splits).as_dict()
 
     def sync_listings(self) -> dict[str, JSONValue]:
-        outcome = self.runtime.publish_listings(self._require_listings())
+        outcome = self.runtime.publish_listings(
+            self._require_listings(),
+            fetched_at_by_key=cast(
+                dict[tuple[str, str, str], datetime],
+                self.fetched_at_by_dataset["listings"],
+            ),
+        )
         self.outcomes["listings"] = outcome
         return _sync_details(outcome)
 
     def sync_quotes(self) -> dict[str, JSONValue]:
-        outcome = self.runtime.publish_quotes(self._require_quotes())
+        outcome = self.runtime.publish_quotes(
+            self._require_quotes(),
+            fetched_at_by_key=cast(
+                dict[tuple[str, str, str, date], datetime],
+                self.fetched_at_by_dataset["eod_quotes"],
+            ),
+        )
         self.outcomes["eod_quotes"] = outcome
         return _sync_details(outcome)
 
     def sync_dividends(self) -> dict[str, JSONValue]:
-        outcome = self.runtime.publish_dividends(self._require_dividends())
+        outcome = self.runtime.publish_dividends(
+            self._require_dividends(),
+            fetched_at_by_key=cast(
+                dict[tuple[str, str, str, str], datetime],
+                self.fetched_at_by_dataset["dividends"],
+            ),
+        )
         self.outcomes["dividends"] = outcome
         return _sync_details(outcome)
 
     def sync_splits(self) -> dict[str, JSONValue]:
-        outcome = self.runtime.publish_splits(self._require_splits())
+        outcome = self.runtime.publish_splits(
+            self._require_splits(),
+            fetched_at_by_key=cast(
+                dict[tuple[str, str, str, str], datetime],
+                self.fetched_at_by_dataset["splits"],
+            ),
+        )
         self.outcomes["splits"] = outcome
         return _sync_details(outcome)
 
@@ -256,11 +297,55 @@ class _WeeklyState:
                 self.action_changed_listings.update(
                     _changed_listing_keys_from_checkpoint(checkpoint[stage])
                 )
+        for stage, dataset in (
+            ("listings", "listings"),
+            ("quotes", "eod_quotes"),
+            ("dividends", "dividends"),
+            ("splits", "splits"),
+        ):
+            if stage in checkpoint:
+                self.fetched_at_by_dataset[dataset] = _fetch_times_from_checkpoint(
+                    dataset,
+                    checkpoint[stage],
+                )
 
     def _require_listings(self) -> ListingGoldResult:
         if self.listings is None:
             raise RuntimeError("listing Gold must exist before this stage")
         return self.listings
+
+    def _record_fetch_times(
+        self,
+        dataset: str,
+        rows: tuple[ListingRecord | QuoteRecord | DividendEvent | SplitEvent, ...],
+        fetched_at_utc: datetime | None,
+    ) -> None:
+        if fetched_at_utc is None:
+            raise ValueError(f"provider fetch time is required for {dataset}")
+        self.fetched_at_by_dataset.setdefault(dataset, {}).update(
+            {cast(object, row.key): fetched_at_utc for row in rows}
+        )
+
+    def _with_fetch_provenance(
+        self,
+        dataset: str,
+        details: dict[str, JSONValue],
+    ) -> dict[str, JSONValue]:
+        entries: list[JSONValue] = []
+        for key, value in sorted(
+            self.fetched_at_by_dataset[dataset].items(),
+            key=lambda item: str(item[0]),
+        ):
+            if not isinstance(key, tuple):
+                raise ValueError(f"invalid fetch provenance key for {dataset}")
+            entries.append(
+                {
+                    "key": [str(part) for part in key],
+                    "fetched_at_utc": value.isoformat(),
+                }
+            )
+        details["fetched_at_by_key"] = entries
+        return details
 
     def _require_quotes(self) -> QuoteGoldResult:
         if self.quotes is None:
@@ -346,6 +431,46 @@ def _changed_listing_keys_from_checkpoint(
     if keys != sorted(set(keys)):
         raise ValueError("checkpoint action changes must be unique and sorted")
     return tuple(keys)
+
+
+def _fetch_times_from_checkpoint(
+    dataset: str,
+    details: Mapping[str, JSONValue],
+) -> dict[object, datetime]:
+    raw = details.get("fetched_at_by_key")
+    if not isinstance(raw, list):
+        raise ValueError(f"checkpoint fetch provenance is missing for {dataset}")
+    result: dict[object, datetime] = {}
+    expected_size = 4 if dataset in {"eod_quotes", "dividends", "splits"} else 3
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError(f"checkpoint fetch provenance is invalid for {dataset}")
+        raw_key = item.get("key")
+        raw_time = item.get("fetched_at_utc")
+        if (
+            not isinstance(raw_key, list)
+            or len(raw_key) != expected_size
+            or not all(isinstance(part, str) for part in raw_key)
+            or not isinstance(raw_time, str)
+        ):
+            raise ValueError(f"checkpoint fetch provenance is invalid for {dataset}")
+        fetched_at = datetime.fromisoformat(raw_time)
+        if fetched_at.tzinfo is None or fetched_at.utcoffset() != UTC.utcoffset(fetched_at):
+            raise ValueError(f"checkpoint fetch provenance must be UTC for {dataset}")
+        key: object
+        if dataset == "eod_quotes":
+            key = (
+                cast(str, raw_key[0]),
+                cast(str, raw_key[1]),
+                cast(str, raw_key[2]),
+                date.fromisoformat(cast(str, raw_key[3])),
+            )
+        else:
+            key = tuple(raw_key)
+        if key in result:
+            raise ValueError(f"checkpoint fetch provenance has duplicate key for {dataset}")
+        result[key] = fetched_at
+    return result
 
 
 def _load_gold_artifact(

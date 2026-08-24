@@ -8,7 +8,7 @@ import json
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Protocol, cast
 from urllib.parse import quote
@@ -82,6 +82,7 @@ class FetchMetrics:
 class FetchBatch[T]:
     rows: tuple[T, ...]
     metrics: FetchMetrics
+    fetched_at_utc: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,10 +192,30 @@ class BootstrapRuntime(Protocol):
         retracted_keys: Sequence[tuple[str, str, str, str]] = (),
     ) -> None: ...
 
-    def publish_listings(self, gold: ListingGoldResult) -> SyncOutcome: ...
-    def publish_quotes(self, gold: QuoteGoldResult) -> SyncOutcome: ...
-    def publish_dividends(self, gold: DividendGoldResult) -> SyncOutcome: ...
-    def publish_splits(self, gold: SplitGoldResult) -> SyncOutcome: ...
+    def publish_listings(
+        self,
+        gold: ListingGoldResult,
+        *,
+        fetched_at_by_key: Mapping[tuple[str, str, str], datetime] | None = None,
+    ) -> SyncOutcome: ...
+    def publish_quotes(
+        self,
+        gold: QuoteGoldResult,
+        *,
+        fetched_at_by_key: Mapping[tuple[str, str, str, date], datetime] | None = None,
+    ) -> SyncOutcome: ...
+    def publish_dividends(
+        self,
+        gold: DividendGoldResult,
+        *,
+        fetched_at_by_key: Mapping[tuple[str, str, str, str], datetime] | None = None,
+    ) -> SyncOutcome: ...
+    def publish_splits(
+        self,
+        gold: SplitGoldResult,
+        *,
+        fetched_at_by_key: Mapping[tuple[str, str, str, str], datetime] | None = None,
+    ) -> SyncOutcome: ...
 
     def verify(
         self,
@@ -395,7 +416,7 @@ class PostgresEodhdBootstrapRuntime:
         self._write_layer(Layer.BRONZE, "listings", raw)
         silver = [record.semantic_dict() for record in result.silver_records]
         self._write_layer(Layer.SILVER, "listings", cast(JSONValue, silver))
-        return FetchBatch(result.silver_records, metrics)
+        return FetchBatch(result.silver_records, metrics, datetime.now(UTC))
 
     def fetch_quotes(
         self,
@@ -419,7 +440,7 @@ class PostgresEodhdBootstrapRuntime:
             listing,
             [record.semantic_dict() for record in result.silver_records],
         )
-        return FetchBatch(result.silver_records, metrics)
+        return FetchBatch(result.silver_records, metrics, datetime.now(UTC))
 
     def fetch_dividends(
         self,
@@ -443,7 +464,7 @@ class PostgresEodhdBootstrapRuntime:
             listing,
             [_dividend_silver(event) for event in result.silver_records],
         )
-        return FetchBatch(result.silver_records, metrics)
+        return FetchBatch(result.silver_records, metrics, datetime.now(UTC))
 
     def fetch_splits(
         self,
@@ -467,7 +488,7 @@ class PostgresEodhdBootstrapRuntime:
             listing,
             [_split_silver(event) for event in result.silver_records],
         )
-        return FetchBatch(result.silver_records, metrics)
+        return FetchBatch(result.silver_records, metrics, datetime.now(UTC))
 
     def persist_gold(
         self,
@@ -520,17 +541,37 @@ class PostgresEodhdBootstrapRuntime:
             cast(JSONValue, [dict(row) for row in semantic_rows]),
         )
 
-    def publish_listings(self, gold: ListingGoldResult) -> SyncOutcome:
-        return sync_listings(self._connection, gold)
+    def publish_listings(
+        self,
+        gold: ListingGoldResult,
+        *,
+        fetched_at_by_key: Mapping[tuple[str, str, str], datetime] | None = None,
+    ) -> SyncOutcome:
+        return sync_listings(self._connection, gold, fetched_at_by_key=fetched_at_by_key)
 
-    def publish_quotes(self, gold: QuoteGoldResult) -> SyncOutcome:
-        return sync_quotes(self._connection, gold)
+    def publish_quotes(
+        self,
+        gold: QuoteGoldResult,
+        *,
+        fetched_at_by_key: Mapping[tuple[str, str, str, date], datetime] | None = None,
+    ) -> SyncOutcome:
+        return sync_quotes(self._connection, gold, fetched_at_by_key=fetched_at_by_key)
 
-    def publish_dividends(self, gold: DividendGoldResult) -> SyncOutcome:
-        return sync_dividends(self._connection, gold)
+    def publish_dividends(
+        self,
+        gold: DividendGoldResult,
+        *,
+        fetched_at_by_key: Mapping[tuple[str, str, str, str], datetime] | None = None,
+    ) -> SyncOutcome:
+        return sync_dividends(self._connection, gold, fetched_at_by_key=fetched_at_by_key)
 
-    def publish_splits(self, gold: SplitGoldResult) -> SyncOutcome:
-        return sync_splits(self._connection, gold)
+    def publish_splits(
+        self,
+        gold: SplitGoldResult,
+        *,
+        fetched_at_by_key: Mapping[tuple[str, str, str, str], datetime] | None = None,
+    ) -> SyncOutcome:
+        return sync_splits(self._connection, gold, fetched_at_by_key=fetched_at_by_key)
 
     def verify(
         self,

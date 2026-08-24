@@ -1,6 +1,6 @@
 """Incremental weekly refresh keeps history outside the authoritative overlap."""
 
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -45,6 +45,7 @@ class _Runtime:
         return FetchBatch(
             (_quote(20, "12"), _quote(22, "13")),
             FetchMetrics(logical_requests=1, attempts=1, rows=2),
+            datetime(2026, 8, 23, 10, 0, tzinfo=UTC),
         )
 
     def persist_gold(self, *args: object, **kwargs: object) -> None:
