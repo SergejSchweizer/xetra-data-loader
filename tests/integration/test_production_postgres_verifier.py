@@ -1,3 +1,4 @@
+import hashlib
 import json
 from dataclasses import replace
 from datetime import date
@@ -20,6 +21,7 @@ from xetra_loader.medallion.core import (
     MedallionLayout,
     canonical_json,
 )
+from xetra_loader.ops.bootstrap import PostgresEodhdBootstrapRuntime
 from xetra_loader.ops.verify_postgres_sync import (
     DATASETS,
     DatasetVerification,
@@ -80,6 +82,7 @@ def _write_dataset(
     dataset: str,
     rows: list[dict[str, JSONValue]],
     fingerprint: str,
+    retracted_keys: list[list[str]] | None = None,
 ) -> None:
     for layer in (Layer.SILVER, Layer.GOLD):
         directory = layout.dataset_path(layer, dataset)
@@ -88,13 +91,23 @@ def _write_dataset(
             canonical_json(rows),
             encoding="utf-8",
         )
+    semantic_metadata: dict[str, JSONValue] = {
+        "row_count": len(rows),
+        "builder_semantic_fingerprint": fingerprint,
+    }
+    if dataset in {"dividends", "splits"}:
+        sidecar = retracted_keys or []
+        layout.retractions_path(Layer.GOLD, dataset).write_text(
+            canonical_json(sidecar) + "\n",
+            encoding="utf-8",
+        )
+        semantic_metadata["retractions_fingerprint"] = hashlib.sha256(
+            canonical_json(sidecar).encode("utf-8")
+        ).hexdigest()
     manifest = Manifest(
         dataset=dataset,
         layer=Layer.GOLD,
-        semantic_metadata={
-            "row_count": len(rows),
-            "builder_semantic_fingerprint": fingerprint,
-        },
+        semantic_metadata=semantic_metadata,
         run_metadata={},
     )
     layout.manifest_path(Layer.GOLD, dataset).write_text(
@@ -138,6 +151,52 @@ def test_gold_snapshot_recomputes_exact_builder_fingerprints(tmp_path: Path) -> 
     assert all(snapshot.source_count == 1 for snapshot in snapshots.values())
     assert all(snapshot.row_count == 1 for snapshot in snapshots.values())
     assert all(snapshot.fingerprint_valid for snapshot in snapshots.values())
+
+
+def test_gold_snapshot_reloads_tombstones_and_rejects_sidecar_tampering(tmp_path: Path) -> None:
+    listing, _, dividend, _ = _records()
+    layout = MedallionLayout(tmp_path)
+    retracted = [[listing.isin, listing.exchange, listing.code, "a" * 64]]
+    active_rows = [dict(row) for row in build_dividend_gold([dividend]).semantic_rows()]
+    fingerprint = semantic_fingerprint("dividends", active_rows, retracted)
+
+    for dataset in ("listings", "eod_quotes", "splits"):
+        _write_dataset(layout, dataset, [], semantic_fingerprint(dataset, []))
+    _write_dataset(layout, "dividends", active_rows, fingerprint, retracted)
+
+    snapshots = load_gold_snapshots(tmp_path)
+    assert snapshots["dividends"].retracted_keys == (tuple(retracted[0]),)
+
+    layout.retractions_path(Layer.GOLD, "dividends").write_text("[]\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="retractions fingerprint mismatch"):
+        load_gold_snapshots(tmp_path)
+
+
+def test_gold_persistence_writes_sorted_tombstone_sidecar(tmp_path: Path) -> None:
+    layout = MedallionLayout(tmp_path)
+    runtime = object.__new__(PostgresEodhdBootstrapRuntime)
+    runtime._layout = layout
+    retracted = (
+        ("DE0000000002", "XETRA", "BBB", "b" * 64),
+        ("DE0000000001", "XETRA", "AAA", "a" * 64),
+    )
+    fingerprint = semantic_fingerprint("dividends", [], [list(key) for key in sorted(retracted)])
+
+    runtime.persist_gold(
+        "dividends",
+        [],
+        row_count=0,
+        semantic_fingerprint=fingerprint,
+        retracted_keys=retracted,
+    )
+
+    assert json.loads(layout.retractions_path(Layer.GOLD, "dividends").read_text()) == [
+        list(key) for key in sorted(retracted)
+    ]
+    manifest = json.loads(layout.manifest_path(Layer.GOLD, "dividends").read_text())
+    assert manifest["semantic_metadata"]["retractions_fingerprint"] == hashlib.sha256(
+        canonical_json([list(key) for key in sorted(retracted)]).encode("utf-8")
+    ).hexdigest()
 
 
 def _passing_dataset() -> DatasetVerification:

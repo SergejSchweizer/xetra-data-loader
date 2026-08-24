@@ -96,8 +96,9 @@ class FixtureRuntime:
         *,
         row_count: int,
         semantic_fingerprint: str,
+        retracted_keys: object = (),
     ) -> None:
-        del semantic_rows, semantic_fingerprint
+        del semantic_rows, semantic_fingerprint, retracted_keys
         self.calls.append(f"persist:{dataset}")
         self.persisted[dataset] = row_count
 

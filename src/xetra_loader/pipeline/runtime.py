@@ -67,6 +67,7 @@ class _WeeklyState:
             self.dividends.semantic_rows(),
             row_count=self.dividends.row_count,
             semantic_fingerprint=self.dividends.semantic_fingerprint,
+            retracted_keys=self.dividends.retracted_keys,
         )
         return {"rows": self.dividends.row_count, "requests": requests}
 
@@ -84,6 +85,7 @@ class _WeeklyState:
             self.splits.semantic_rows(),
             row_count=self.splits.row_count,
             semantic_fingerprint=self.splits.semantic_fingerprint,
+            retracted_keys=self.splits.retracted_keys,
         )
         return {"rows": self.splits.row_count, "requests": requests}
 

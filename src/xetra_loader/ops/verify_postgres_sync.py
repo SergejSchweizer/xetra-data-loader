@@ -52,6 +52,7 @@ class GoldDatasetSnapshot:
     dataset: str
     source_count: int
     rows: tuple[dict[str, JSONValue], ...]
+    retracted_keys: tuple[tuple[str, str, str, str], ...]
     manifest_fingerprint: str
     computed_fingerprint: str
 
@@ -361,19 +362,61 @@ def load_gold_snapshots(root: Path) -> dict[str, GoldDatasetSnapshot]:
         if not isinstance(manifest_fingerprint, str) or len(manifest_fingerprint) != 64:
             raise ValueError(f"Gold manifest for {dataset} has no builder fingerprint")
         ordered = tuple(sorted(gold_rows, key=lambda row: _business_key(dataset, row)))
+        retracted_keys: tuple[tuple[str, str, str, str], ...] = ()
+        if dataset in {"dividends", "splits"}:
+            retractions_path = layout.retractions_path(Layer.GOLD, dataset)
+            if not retractions_path.exists():
+                raise ValueError(f"Gold retractions are missing for {dataset}")
+            decoded_retractions = cast(
+                JSONValue,
+                json.loads(retractions_path.read_text(encoding="utf-8")),
+            )
+            if not isinstance(decoded_retractions, list):
+                raise ValueError(f"Gold retractions for {dataset} must be a JSON array")
+            retracted_keys = _validated_retracted_keys(dataset, decoded_retractions)
+            expected_retraction_fingerprint = semantic_metadata.get("retractions_fingerprint")
+            actual_retraction_fingerprint = hashlib.sha256(
+                canonical_json([list(key) for key in retracted_keys]).encode("utf-8")
+            ).hexdigest()
+            if expected_retraction_fingerprint != actual_retraction_fingerprint:
+                raise ValueError(f"Gold retractions fingerprint mismatch for {dataset}")
         result[dataset] = GoldDatasetSnapshot(
             dataset=dataset,
             source_count=len(source_rows),
             rows=ordered,
+            retracted_keys=retracted_keys,
             manifest_fingerprint=manifest_fingerprint,
-            computed_fingerprint=semantic_fingerprint(dataset, ordered),
+            computed_fingerprint=semantic_fingerprint(
+                dataset,
+                ordered,
+                [list(key) for key in retracted_keys],
+            ),
         )
     return result
+
+
+def _validated_retracted_keys(
+    dataset: str,
+    value: list[JSONValue],
+) -> tuple[tuple[str, str, str, str], ...]:
+    """Reject malformed or non-canonical corporate-action tombstones."""
+
+    keys: list[tuple[str, str, str, str]] = []
+    for value_key in value:
+        if not isinstance(value_key, list) or len(value_key) != 4:
+            raise ValueError(f"Gold retractions for {dataset} contain an invalid key")
+        if not all(isinstance(part, str) for part in value_key):
+            raise ValueError(f"Gold retractions for {dataset} contain a non-string key")
+        keys.append(cast(tuple[str, str, str, str], tuple(value_key)))
+    if keys != sorted(set(keys)):
+        raise ValueError(f"Gold retractions for {dataset} must be unique and sorted")
+    return tuple(keys)
 
 
 def semantic_fingerprint(
     dataset: str,
     rows: Sequence[Mapping[str, JSONValue]],
+    retracted_keys: Sequence[JSONValue] = (),
 ) -> str:
     """Recompute the exact Gold-builder semantic fingerprint for serving rows."""
 
@@ -383,7 +426,7 @@ def semantic_fingerprint(
     ]
     payload: JSONValue
     if dataset in {"dividends", "splits"}:
-        payload = {"rows": ordered, "retracted_keys": []}
+        payload = {"rows": ordered, "retracted_keys": list(retracted_keys)}
     else:
         payload = ordered
     return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
