@@ -2,18 +2,27 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import date
+from decimal import Decimal
+from pathlib import Path
+from typing import cast
 
 from xetra_loader.contracts.corporate_actions import DividendEvent, SplitEvent
+from xetra_loader.contracts.listings import deserialize_listings
 from xetra_loader.contracts.quotes import QuoteRecord
 from xetra_loader.gold.dividends import DividendGoldResult, build_dividend_gold
 from xetra_loader.gold.listings import ListingGoldResult, build_listing_gold
 from xetra_loader.gold.quotes import QuoteGoldResult, build_quote_gold
 from xetra_loader.gold.splits import SplitGoldResult, build_split_gold
 from xetra_loader.gold.validation import validate_complete_gold
+from xetra_loader.medallion.core import JSONValue, Layer, Manifest, MedallionLayout, canonical_json
 from xetra_loader.ops.bootstrap import PostgresEodhdBootstrapRuntime
 from xetra_loader.pipeline.orchestrator import PipelineStages
-from xetra_loader.sync.core import JSONValue, SyncOutcome
+from xetra_loader.sync.core import SyncCounters, SyncOutcome
 
 
 @dataclass(slots=True)
@@ -34,7 +43,11 @@ class _WeeklyState:
             row_count=self.listings.row_count,
             semantic_fingerprint=self.listings.semantic_fingerprint,
         )
-        return {"rows": self.listings.row_count, "requests": batch.metrics.logical_requests}
+        return _ingest_details(
+            self.listings.row_count,
+            batch.metrics.logical_requests,
+            self.listings.semantic_fingerprint,
+        )
 
     def ingest_quotes(self) -> dict[str, JSONValue]:
         listings = self._require_listings()
@@ -51,7 +64,7 @@ class _WeeklyState:
             row_count=self.quotes.row_count,
             semantic_fingerprint=self.quotes.semantic_fingerprint,
         )
-        return {"rows": self.quotes.row_count, "requests": requests}
+        return _ingest_details(self.quotes.row_count, requests, self.quotes.semantic_fingerprint)
 
     def ingest_dividends(self) -> dict[str, JSONValue]:
         listings = self._require_listings()
@@ -69,7 +82,11 @@ class _WeeklyState:
             semantic_fingerprint=self.dividends.semantic_fingerprint,
             retracted_keys=self.dividends.retracted_keys,
         )
-        return {"rows": self.dividends.row_count, "requests": requests}
+        return _ingest_details(
+            self.dividends.row_count,
+            requests,
+            self.dividends.semantic_fingerprint,
+        )
 
     def ingest_splits(self) -> dict[str, JSONValue]:
         listings = self._require_listings()
@@ -87,7 +104,7 @@ class _WeeklyState:
             semantic_fingerprint=self.splits.semantic_fingerprint,
             retracted_keys=self.splits.retracted_keys,
         )
-        return {"rows": self.splits.row_count, "requests": requests}
+        return _ingest_details(self.splits.row_count, requests, self.splits.semantic_fingerprint)
 
     def validate_gold(self) -> dict[str, JSONValue]:
         listings, quotes, dividends, splits = self._require_gold()
@@ -128,6 +145,50 @@ class _WeeklyState:
             return verification.as_dict()
         finally:
             self.runtime.close()
+
+    def rehydrate(self, checkpoint: Mapping[str, Mapping[str, JSONValue]]) -> None:
+        """Restore completed Gold and sync state, refusing mismatched artifacts."""
+
+        root = self.runtime._layout.root
+        if "listings" in checkpoint:
+            rows, fingerprint, _ = _load_gold_artifact(root, "listings")
+            self.listings = build_listing_gold(
+                deserialize_listings(canonical_json(cast(JSONValue, rows)))
+            )
+            _require_checkpoint_fingerprint(
+                "listings", checkpoint, fingerprint, self.listings.semantic_fingerprint
+            )
+        if "quotes" in checkpoint:
+            rows, fingerprint, _ = _load_gold_artifact(root, "eod_quotes")
+            self.quotes = build_quote_gold(_quotes_from_rows(rows))
+            _require_checkpoint_fingerprint(
+                "quotes", checkpoint, fingerprint, self.quotes.semantic_fingerprint
+            )
+        if "dividends" in checkpoint:
+            rows, fingerprint, retracted = _load_gold_artifact(root, "dividends")
+            dividend_rows = _dividends_from_rows(rows)
+            computed = _corporate_fingerprint(rows, retracted)
+            _require_checkpoint_fingerprint("dividends", checkpoint, fingerprint, computed)
+            self.dividends = DividendGoldResult(
+                dividend_rows,
+                retracted,
+                len(dividend_rows),
+                computed,
+            )
+        if "splits" in checkpoint:
+            rows, fingerprint, retracted = _load_gold_artifact(root, "splits")
+            split_rows = _splits_from_rows(rows)
+            computed = _corporate_fingerprint(rows, retracted)
+            _require_checkpoint_fingerprint("splits", checkpoint, fingerprint, computed)
+            self.splits = SplitGoldResult(split_rows, retracted, len(split_rows), computed)
+        for stage, dataset in (
+            ("postgres_listings_sync", "listings"),
+            ("postgres_quotes_sync", "eod_quotes"),
+            ("postgres_dividends_sync", "dividends"),
+            ("postgres_splits_sync", "splits"),
+        ):
+            if stage in checkpoint:
+                self.outcomes[dataset] = _outcome_from_checkpoint(dataset, checkpoint[stage])
 
     def _require_listings(self) -> ListingGoldResult:
         if self.listings is None:
@@ -175,14 +236,216 @@ def build_weekly_stages() -> PipelineStages:
         postgres_dividends_sync=state.sync_dividends,
         postgres_splits_sync=state.sync_splits,
         verification=state.verify,
+        rehydrate=state.rehydrate,
     )
 
 
 def _sync_details(outcome: SyncOutcome) -> dict[str, JSONValue]:
     return {
+        "run_id": outcome.run_id,
+        "fingerprint": outcome.semantic_fingerprint,
+        "row_count": outcome.row_count,
         "status": outcome.status,
         "inserted": outcome.counters.inserted,
         "updated": outcome.counters.updated,
         "deleted": outcome.counters.deleted,
         "retracted": outcome.counters.retracted,
     }
+
+
+def _ingest_details(rows: int, requests: int, fingerprint: str) -> dict[str, JSONValue]:
+    return {"rows": rows, "requests": requests, "fingerprint": fingerprint}
+
+
+def _load_gold_artifact(
+    root: Path,
+    dataset: str,
+) -> tuple[list[dict[str, JSONValue]], str, tuple[tuple[str, str, str, str], ...]]:
+    layout = MedallionLayout(root)
+    payload = cast(
+        JSONValue, json.loads((layout.dataset_path(Layer.GOLD, dataset) / "data.json").read_text())
+    )
+    if not isinstance(payload, list) or not all(isinstance(row, dict) for row in payload):
+        raise ValueError(f"invalid Gold data artifact for {dataset}")
+    rows = cast(list[dict[str, JSONValue]], payload)
+    manifest_payload = cast(
+        JSONValue, json.loads(layout.manifest_path(Layer.GOLD, dataset).read_text())
+    )
+    if not isinstance(manifest_payload, dict):
+        raise ValueError(f"invalid Gold manifest for {dataset}")
+    semantic_metadata = manifest_payload.get("semantic_metadata")
+    if not isinstance(semantic_metadata, dict):
+        raise ValueError(f"Gold manifest has no semantic metadata for {dataset}")
+    fingerprint = semantic_metadata.get("builder_semantic_fingerprint")
+    if not isinstance(fingerprint, str) or len(fingerprint) != 64:
+        raise ValueError(f"Gold manifest has no builder fingerprint for {dataset}")
+    manifest_fingerprint = manifest_payload.get("semantic_fingerprint")
+    run_metadata = manifest_payload.get("run_metadata")
+    if not isinstance(run_metadata, dict):
+        raise ValueError(f"Gold manifest has invalid run metadata for {dataset}")
+    expected_manifest = Manifest(dataset, Layer.GOLD, semantic_metadata, run_metadata)
+    if manifest_fingerprint != expected_manifest.semantic_fingerprint():
+        raise ValueError(f"Gold manifest semantic fingerprint mismatch for {dataset}")
+    retracted: tuple[tuple[str, str, str, str], ...] = ()
+    if dataset in {"dividends", "splits"}:
+        retracted_payload = cast(
+            JSONValue, json.loads(layout.retractions_path(Layer.GOLD, dataset).read_text())
+        )
+        if not isinstance(retracted_payload, list):
+            raise ValueError(f"invalid Gold retractions for {dataset}")
+        parsed: list[tuple[str, str, str, str]] = []
+        for key in retracted_payload:
+            if (
+                not isinstance(key, list)
+                or len(key) != 4
+                or not all(isinstance(part, str) for part in key)
+            ):
+                raise ValueError(f"invalid Gold retraction key for {dataset}")
+            parsed.append(cast(tuple[str, str, str, str], tuple(key)))
+        if parsed != sorted(set(parsed)):
+            raise ValueError(f"Gold retractions must be unique and sorted for {dataset}")
+        retracted = tuple(parsed)
+        sidecar_fingerprint = semantic_metadata.get("retractions_fingerprint")
+        actual_sidecar_fingerprint = hashlib.sha256(
+            canonical_json([list(key) for key in retracted]).encode("utf-8")
+        ).hexdigest()
+        if sidecar_fingerprint != actual_sidecar_fingerprint:
+            raise ValueError(f"Gold retractions fingerprint mismatch for {dataset}")
+    return rows, fingerprint, retracted
+
+
+def _require_checkpoint_fingerprint(
+    stage: str,
+    checkpoint: Mapping[str, Mapping[str, JSONValue]],
+    artifact_fingerprint: str,
+    rebuilt_fingerprint: str,
+) -> None:
+    expected = checkpoint[stage].get("fingerprint")
+    if (
+        not isinstance(expected, str)
+        or expected != artifact_fingerprint
+        or expected != rebuilt_fingerprint
+    ):
+        raise ValueError(f"checkpoint fingerprint mismatch for {stage}")
+
+
+def _corporate_fingerprint(
+    rows: list[dict[str, JSONValue]],
+    retracted: tuple[tuple[str, str, str, str], ...],
+) -> str:
+    payload: JSONValue = {
+        "rows": cast(JSONValue, rows),
+        "retracted_keys": [list(key) for key in retracted],
+    }
+    return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def _required_text(row: Mapping[str, JSONValue], field: str) -> str:
+    value = row.get(field)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"Gold field {field} must be non-empty text")
+    return value
+
+
+def _optional_text(row: Mapping[str, JSONValue], field: str) -> str | None:
+    value = row.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"Gold field {field} must be text or null")
+    return value
+
+
+def _optional_date(row: Mapping[str, JSONValue], field: str) -> date | None:
+    value = _optional_text(row, field)
+    return None if value is None else date.fromisoformat(value)
+
+
+def _optional_decimal(row: Mapping[str, JSONValue], field: str) -> Decimal | None:
+    value = _optional_text(row, field)
+    return None if value is None else Decimal(value)
+
+
+def _quotes_from_rows(rows: list[dict[str, JSONValue]]) -> tuple[QuoteRecord, ...]:
+    return tuple(
+        QuoteRecord(
+            isin=_required_text(row, "isin"),
+            exchange=_required_text(row, "exchange"),
+            code=_required_text(row, "code"),
+            trade_date=date.fromisoformat(_required_text(row, "trade_date")),
+            open=_optional_decimal(row, "open"),
+            high=_optional_decimal(row, "high"),
+            low=_optional_decimal(row, "low"),
+            close=Decimal(_required_text(row, "close")),
+            adjusted_close=_optional_decimal(row, "adjusted_close"),
+            volume=cast(int | None, row.get("volume")),
+        )
+        for row in rows
+    )
+
+
+def _dividends_from_rows(rows: list[dict[str, JSONValue]]) -> tuple[DividendEvent, ...]:
+    events = tuple(
+        DividendEvent(
+            isin=_required_text(row, "isin"),
+            exchange=_required_text(row, "exchange"),
+            code=_required_text(row, "code"),
+            event_date=date.fromisoformat(_required_text(row, "event_date")),
+            value=Decimal(_required_text(row, "value")),
+            currency=_optional_text(row, "currency"),
+            period=_optional_text(row, "period"),
+            declaration_date=_optional_date(row, "declaration_date"),
+            record_date=_optional_date(row, "record_date"),
+            payment_date=_optional_date(row, "payment_date"),
+        )
+        for row in rows
+    )
+    if any(
+        _required_text(row, "event_key") != event.event_key
+        for row, event in zip(rows, events, strict=True)
+    ):
+        raise ValueError("Gold dividend event key mismatch")
+    return events
+
+
+def _splits_from_rows(rows: list[dict[str, JSONValue]]) -> tuple[SplitEvent, ...]:
+    events = tuple(
+        SplitEvent(
+            isin=_required_text(row, "isin"),
+            exchange=_required_text(row, "exchange"),
+            code=_required_text(row, "code"),
+            event_date=date.fromisoformat(_required_text(row, "event_date")),
+            split_ratio=_required_text(row, "split_ratio"),
+            split_factor=_optional_decimal(row, "split_factor"),
+        )
+        for row in rows
+    )
+    if any(
+        _required_text(row, "event_key") != event.event_key
+        for row, event in zip(rows, events, strict=True)
+    ):
+        raise ValueError("Gold split event key mismatch")
+    return events
+
+
+def _outcome_from_checkpoint(dataset: str, details: Mapping[str, JSONValue]) -> SyncOutcome:
+    run_id = _required_text(details, "run_id")
+    fingerprint = _required_text(details, "fingerprint")
+    status = _required_text(details, "status")
+    row_count = details.get("row_count")
+    counters = tuple(details.get(name) for name in ("inserted", "updated", "deleted", "retracted"))
+    if not isinstance(row_count, int) or not all(isinstance(value, int) for value in counters):
+        raise ValueError(f"invalid sync checkpoint for {dataset}")
+    return SyncOutcome(
+        run_id,
+        dataset,
+        fingerprint,
+        row_count,
+        status,
+        SyncCounters(
+            inserted=cast(int, counters[0]),
+            updated=cast(int, counters[1]),
+            deleted=cast(int, counters[2]),
+            retracted=cast(int, counters[3]),
+        ),
+    )
