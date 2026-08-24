@@ -15,6 +15,7 @@ from xetra_loader.contracts.corporate_actions import (
     retract_dividend,
 )
 from xetra_loader.contracts.listings import ListingRecord
+from xetra_loader.contracts.numeric import provider_decimal
 
 type JSONValue = str | int | float | bool | None | list[JSONValue] | dict[str, JSONValue]
 
@@ -87,6 +88,7 @@ def ingest_dividends(
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
+            default=str,
         ),
         silver_records=tuple(reconciled),
         correction_count=corrections,
@@ -130,9 +132,7 @@ def _required_text(row: Mapping[str, JSONValue], key: str) -> str:
 
 def _required_decimal(row: Mapping[str, JSONValue], key: str) -> Decimal:
     value = row.get(key)
-    if value is None or value == "" or isinstance(value, (bool, list, dict)):
-        raise ValueError(f"dividend field {key} must be numeric")
-    return Decimal(str(value))
+    return provider_decimal(value, field=f"dividend field {key}")
 
 
 def _optional_text(value: JSONValue) -> str | None:
@@ -149,4 +149,4 @@ def _optional_date(value: JSONValue) -> date | None:
 
 
 def _canonical_row(row: dict[str, JSONValue]) -> str:
-    return json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)

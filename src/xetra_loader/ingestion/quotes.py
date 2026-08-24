@@ -10,6 +10,7 @@ from decimal import Decimal
 from typing import Protocol
 
 from xetra_loader.contracts.listings import ListingRecord
+from xetra_loader.contracts.numeric import provider_decimal
 from xetra_loader.contracts.quotes import QuoteRecord, overlap_start, validate_unique_quotes
 
 type JSONValue = str | int | float | bool | None | list[JSONValue] | dict[str, JSONValue]
@@ -75,6 +76,7 @@ def ingest_quotes(
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
+            default=str,
         ),
         silver_records=silver_records,
         inserted_keys=tuple(inserted),
@@ -108,9 +110,7 @@ def _required_text(row: Mapping[str, JSONValue], key: str) -> str:
 def _decimal(value: JSONValue) -> Decimal | None:
     if value is None or value == "":
         return None
-    if isinstance(value, (bool, list, dict)):
-        raise ValueError("quote numeric field must be scalar")
-    return Decimal(str(value))
+    return provider_decimal(value, field="quote numeric field")
 
 
 def _required_decimal(row: Mapping[str, JSONValue], key: str) -> Decimal:
@@ -123,10 +123,14 @@ def _required_decimal(row: Mapping[str, JSONValue], key: str) -> Decimal:
 def _integer(value: JSONValue) -> int | None:
     if value is None or value == "":
         return None
-    if isinstance(value, (bool, list, dict)):
-        raise ValueError("quote volume must be scalar")
-    return int(value)
+    decimal = provider_decimal(value, field="quote volume")
+    if decimal != decimal.to_integral_value():
+        raise ValueError("quote volume must be an exact integer")
+    volume = int(decimal)
+    if volume < 0:
+        raise ValueError("quote volume must be non-negative")
+    return volume
 
 
 def _canonical_row(row: dict[str, JSONValue]) -> str:
-    return json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)

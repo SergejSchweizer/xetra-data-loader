@@ -9,6 +9,8 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 
+from xetra_loader.contracts.numeric import canonical_decimal, require_finite
+
 type JSONValue = str | int | float | bool | None | list[JSONValue] | dict[str, JSONValue]
 
 
@@ -49,6 +51,9 @@ class DividendEvent:
     payment_date: date | None = None
     status: ActionStatus = ActionStatus.ACTIVE
 
+    def __post_init__(self) -> None:
+        require_finite(self.value, field="dividend value")
+
     @property
     def event_key(self) -> str:
         return _event_key("dividend", self.business_fields())
@@ -63,7 +68,7 @@ class DividendEvent:
             "exchange": self.exchange,
             "code": self.code,
             "event_date": self.event_date.isoformat(),
-            "value": str(self.value),
+            "value": canonical_decimal(self.value),
             "currency": self.currency,
             "period": self.period,
             "declaration_date": _date_text(self.declaration_date),
@@ -84,6 +89,12 @@ class SplitEvent:
     split_factor: Decimal | None = None
     status: ActionStatus = ActionStatus.ACTIVE
 
+    def __post_init__(self) -> None:
+        if self.split_factor is not None:
+            require_finite(self.split_factor, field="split factor")
+            if self.split_factor <= 0:
+                raise ValueError("split factor must be positive")
+
     @property
     def event_key(self) -> str:
         return _event_key("split", self.business_fields())
@@ -99,7 +110,9 @@ class SplitEvent:
             "code": self.code,
             "event_date": self.event_date.isoformat(),
             "split_ratio": self.split_ratio,
-            "split_factor": None if self.split_factor is None else str(self.split_factor),
+            "split_factor": (
+                None if self.split_factor is None else canonical_decimal(self.split_factor)
+            ),
         }
 
 

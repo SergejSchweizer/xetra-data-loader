@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
+from xetra_loader.contracts.numeric import canonical_decimal, require_finite
+
 type JSONValue = str | int | float | bool | None | list[JSONValue] | dict[str, JSONValue]
 
 OVERLAP_DAYS = 7
@@ -29,11 +31,27 @@ class QuoteRecord:
     volume: int | None
 
     def __post_init__(self) -> None:
-        for name, value in (("isin", self.isin), ("exchange", self.exchange), ("code", self.code)):
-            if not value.strip():
+        identities = (("isin", self.isin), ("exchange", self.exchange), ("code", self.code))
+        for name, identity in identities:
+            if not identity.strip():
                 raise ValueError(f"{name} must be non-empty")
         if self.volume is not None and self.volume < 0:
             raise ValueError("volume must be non-negative")
+        for name, price in (
+            ("open", self.open),
+            ("high", self.high),
+            ("low", self.low),
+            ("close", self.close),
+            ("adjusted_close", self.adjusted_close),
+        ):
+            if price is not None:
+                require_finite(price, field=name)
+                if price < 0:
+                    raise ValueError(f"{name} must be non-negative")
+        if self.low is not None and self.high is not None:
+            for name, price in (("open", self.open), ("close", self.close)):
+                if price is not None and not self.low <= price <= self.high:
+                    raise ValueError(f"{name} must be between low and high")
 
     @property
     def key(self) -> tuple[str, str, str, date]:
@@ -55,7 +73,7 @@ class QuoteRecord:
             "open": _decimal_text(self.open),
             "high": _decimal_text(self.high),
             "low": _decimal_text(self.low),
-            "close": str(self.close),
+            "close": canonical_decimal(self.close),
             "adjusted_close": _decimal_text(self.adjusted_close),
             "volume": self.volume,
         }
@@ -106,4 +124,4 @@ def serialize_quotes(records: Iterable[QuoteRecord]) -> str:
 
 
 def _decimal_text(value: Decimal | None) -> str | None:
-    return None if value is None else str(value)
+    return None if value is None else canonical_decimal(value)
