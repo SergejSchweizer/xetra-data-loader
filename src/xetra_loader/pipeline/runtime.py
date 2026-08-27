@@ -641,7 +641,12 @@ def _replace_action_window[T: DividendEvent | SplitEvent](
     if last_date is None:
         return refreshed
     start = last_date - timedelta(days=7)
-    return tuple(record for record in previous if record.event_date < start) + refreshed
+    retained = (record for record in previous if record.event_date < start)
+    by_key = {record.key: record for record in retained}
+    by_key.update({record.key: record for record in refreshed})
+    return tuple(
+        sorted(by_key.values(), key=lambda record: (record.event_date, record.key, record.status))
+    )
 
 
 def _action_set_changed(
