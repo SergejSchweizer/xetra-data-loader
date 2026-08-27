@@ -4,13 +4,15 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 from xetra_loader.contracts.corporate_actions import DividendEvent
 from xetra_loader.contracts.listings import ListingRecord
 from xetra_loader.contracts.quotes import QuoteRecord
 from xetra_loader.gold.listings import build_listing_gold
 from xetra_loader.medallion.core import Layer, MedallionLayout, canonical_json
 from xetra_loader.ops.bootstrap import FetchBatch, FetchMetrics
-from xetra_loader.pipeline.runtime import _replace_action_window, _WeeklyState
+from xetra_loader.pipeline.runtime import _replace_action_window, _WeeklyState, build_weekly_stages
 
 
 def _quote(day: int, close: str) -> QuoteRecord:
@@ -130,3 +132,22 @@ def test_action_refresh_overwrites_retained_duplicate_provider_history() -> None
     )
 
     assert merged == (historical, latest)
+
+
+def test_weekly_stages_quarantine_invalid_provider_ohlc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, bool] = {}
+
+    def from_environment(*, quarantine_invalid_ohlc: bool = False) -> object:
+        captured["quarantine_invalid_ohlc"] = quarantine_invalid_ohlc
+        return object()
+
+    monkeypatch.setattr(
+        "xetra_loader.pipeline.runtime.PostgresEodhdBootstrapRuntime.from_environment",
+        from_environment,
+    )
+
+    build_weekly_stages()
+
+    assert captured == {"quarantine_invalid_ohlc": True}

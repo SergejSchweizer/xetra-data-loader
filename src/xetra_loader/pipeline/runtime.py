@@ -376,7 +376,9 @@ class _WeeklyState:
 def build_weekly_stages() -> PipelineStages:
     """Build the concrete factory referenced by the deployed Vienna cron entry."""
 
-    state = _WeeklyState(PostgresEodhdBootstrapRuntime.from_environment())
+    state = _WeeklyState(
+        PostgresEodhdBootstrapRuntime.from_environment(quarantine_invalid_ohlc=True)
+    )
     return PipelineStages(
         listings=state.ingest_listings,
         quotes=state.ingest_quotes,

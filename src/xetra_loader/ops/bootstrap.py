@@ -510,13 +510,18 @@ class PostgresEodhdBootstrapRuntime:
         self._quarantine_invalid_ohlc = quarantine_invalid_ohlc
 
     @classmethod
-    def from_environment(cls) -> PostgresEodhdBootstrapRuntime:
+    def from_environment(
+        cls,
+        *,
+        quarantine_invalid_ohlc: bool = False,
+    ) -> PostgresEodhdBootstrapRuntime:
         root = resolve_medallion_root()
         return cls(
             connection=connect_postgres(require_non_superuser=True),
             transport=_MeasuredTransport(),
             medallion_root=Path(root),
             repository_root=Path.cwd(),
+            quarantine_invalid_ohlc=quarantine_invalid_ohlc,
         )
 
     @classmethod
