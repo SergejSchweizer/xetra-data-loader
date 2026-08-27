@@ -574,7 +574,14 @@ def _backup_owned_state(medallion_root: Path, backup_root: Path) -> None:
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     destination = backup_root.resolve() / f"xetra-loader-{stamp}"
     destination.mkdir(parents=True, exist_ok=False)
-    _dump_owned_schemas(destination / "postgres.sql")
+    schemas = _existing_owned_schemas()
+    if schemas:
+        _dump_owned_schemas(destination / "postgres.sql", schemas)
+    else:
+        (destination / "empty-postgres-state.json").write_text(
+            canonical_json({"schemas": []}) + "\n",
+            encoding="utf-8",
+        )
     manifests = destination / "gold-manifests"
     manifests.mkdir()
     layout = MedallionLayout(medallion_root)
@@ -593,7 +600,21 @@ def _backup_owned_state(medallion_root: Path, backup_root: Path) -> None:
     )
 
 
-def _dump_owned_schemas(path: Path) -> None:
+def _existing_owned_schemas() -> tuple[str, ...]:
+    """Return only loader-owned schemas present in the configured target database."""
+
+    connection = connect_postgres(admin=True)
+    try:
+        rows = connection.execute(
+            "SELECT nspname FROM pg_namespace "
+            "WHERE nspname IN ('xetra_loader', 'xetra_loader_sync') ORDER BY nspname"
+        ).fetchall()
+    finally:
+        connection.close()
+    return tuple(str(row[0]) for row in rows)
+
+
+def _dump_owned_schemas(path: Path, schemas: Sequence[str]) -> None:
     """Use libpq environment credentials so no password appears in the process arguments."""
 
     values = conninfo_to_dict(resolve_postgres_admin_dsn())
@@ -615,8 +636,7 @@ def _dump_owned_schemas(path: Path) -> None:
         f"--username={user}",
         f"--dbname={database}",
         "--format=custom",
-        "--schema=xetra_loader",
-        "--schema=xetra_loader_sync",
+        *(f"--schema={schema}" for schema in schemas),
         f"--file={path}",
     ]
     subprocess.run(command, check=True, env=environment, capture_output=True, text=True)
