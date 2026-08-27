@@ -4,12 +4,13 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
+from xetra_loader.contracts.corporate_actions import DividendEvent
 from xetra_loader.contracts.listings import ListingRecord
 from xetra_loader.contracts.quotes import QuoteRecord
 from xetra_loader.gold.listings import build_listing_gold
 from xetra_loader.medallion.core import Layer, MedallionLayout, canonical_json
 from xetra_loader.ops.bootstrap import FetchBatch, FetchMetrics
-from xetra_loader.pipeline.runtime import _WeeklyState
+from xetra_loader.pipeline.runtime import _replace_action_window, _WeeklyState
 
 
 def _quote(day: int, close: str) -> QuoteRecord:
@@ -24,6 +25,17 @@ def _quote(day: int, close: str) -> QuoteRecord:
         close=Decimal(close),
         adjusted_close=Decimal(close),
         volume=100,
+    )
+
+
+def _dividend(day: int, value: str = "1.25") -> DividendEvent:
+    return DividendEvent(
+        isin="DE0000000001",
+        exchange="XETRA",
+        code="AAA",
+        event_date=date(2026, 8, day),
+        value=Decimal(value),
+        currency="EUR",
     )
 
 
@@ -105,3 +117,16 @@ def test_action_change_forces_one_listing_to_full_quote_history(tmp_path: Path) 
         "2026-08-20",
         "2026-08-22",
     ]
+
+
+def test_action_refresh_overwrites_retained_duplicate_provider_history() -> None:
+    historical = _dividend(10)
+    latest = _dividend(20, "1.30")
+
+    merged = _replace_action_window(
+        (historical, latest),
+        (historical, latest),
+        last_date=latest.event_date,
+    )
+
+    assert merged == (historical, latest)
