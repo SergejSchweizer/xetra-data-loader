@@ -47,8 +47,9 @@ def test_ignored_yaml_config_resolves_loader_values(
         "postgresql://loader:p%40ss%2Fword@127.0.0.1:6543/market"
     )
     assert resolve_postgres_writer_dsn() == resolve_postgres_dsn()
-    with pytest.raises(ValueError, match="ADMIN_DSN"):
-        resolve_postgres_admin_dsn()
+    assert resolve_postgres_admin_dsn() == (
+        "postgresql://loader:p%40ss%2Fword@127.0.0.1:6543/market"
+    )
     assert resolve_medallion_root() == "/tmp/medallion"
 
 
