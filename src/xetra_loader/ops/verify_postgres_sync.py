@@ -5,23 +5,36 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import socket
-from collections.abc import Mapping, Sequence
+import subprocess
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
 
 from psycopg import Connection, Cursor, Error
+from psycopg.conninfo import conninfo_to_dict
 
-from xetra_loader.config import resolve_medallion_root
+from xetra_loader.config import resolve_medallion_root, resolve_postgres_admin_dsn
+from xetra_loader.contracts.corporate_actions import DividendEvent, SplitEvent
+from xetra_loader.contracts.listings import ListingRecord
+from xetra_loader.contracts.quotes import QuoteRecord
+from xetra_loader.gold.dividends import DividendGoldResult
+from xetra_loader.gold.listings import ListingGoldResult
+from xetra_loader.gold.quotes import QuoteGoldResult
+from xetra_loader.gold.splits import SplitGoldResult
 from xetra_loader.medallion.core import JSONValue, Layer, MedallionLayout, canonical_json
 from xetra_loader.ops.bootstrap import (
     BootstrapResult,
+    FetchBatch,
     PostgresEodhdBootstrapRuntime,
     run_full_bootstrap,
 )
+from xetra_loader.pipeline.restart import LoaderLock, run_restartable_pipeline
+from xetra_loader.pipeline.runtime import build_weekly_stages
 from xetra_loader.sync import connect_postgres
 from xetra_loader.sync.core import SyncOutcome
 
@@ -232,51 +245,150 @@ class ProductionVerificationError(RuntimeError):
     """Raised whenever the mandatory production acceptance contract does not pass."""
 
 
+class _AdminResetWriterPublishRuntime:
+    """Keep reset/fetch work administrative while serving writes use the writer login."""
+
+    def __init__(self, admin: PostgresEodhdBootstrapRuntime) -> None:
+        self._admin = admin
+        self._writer: PostgresEodhdBootstrapRuntime | None = None
+
+    def reset_owned_state(self) -> None:
+        self._admin.reset_owned_state()
+
+    def fetch_listings(self) -> FetchBatch[ListingRecord]:
+        return self._admin.fetch_listings()
+
+    def fetch_quotes(
+        self,
+        listing: ListingRecord,
+        *,
+        last_business_date: date | None = None,
+        previous_records: Iterable[QuoteRecord] = (),
+    ) -> FetchBatch[QuoteRecord]:
+        return self._admin.fetch_quotes(
+            listing,
+            last_business_date=last_business_date,
+            previous_records=previous_records,
+        )
+
+    def fetch_dividends(
+        self,
+        listing: ListingRecord,
+        *,
+        last_event_date: date | None = None,
+        previous_records: Iterable[DividendEvent] = (),
+    ) -> FetchBatch[DividendEvent]:
+        return self._admin.fetch_dividends(
+            listing,
+            last_event_date=last_event_date,
+            previous_records=previous_records,
+        )
+
+    def fetch_splits(
+        self,
+        listing: ListingRecord,
+        *,
+        last_event_date: date | None = None,
+        previous_records: Iterable[SplitEvent] = (),
+    ) -> FetchBatch[SplitEvent]:
+        return self._admin.fetch_splits(
+            listing,
+            last_event_date=last_event_date,
+            previous_records=previous_records,
+        )
+
+    def persist_gold(self, *args: Any, **kwargs: Any) -> None:
+        self._admin.persist_gold(*args, **kwargs)
+
+    def publish_listings(self, gold: ListingGoldResult, **kwargs: Any) -> SyncOutcome:
+        return self._writer_runtime().publish_listings(gold, **kwargs)
+
+    def publish_quotes(self, gold: QuoteGoldResult, **kwargs: Any) -> SyncOutcome:
+        return self._writer_runtime().publish_quotes(gold, **kwargs)
+
+    def publish_dividends(self, gold: DividendGoldResult, **kwargs: Any) -> SyncOutcome:
+        return self._writer_runtime().publish_dividends(gold, **kwargs)
+
+    def publish_splits(self, gold: SplitGoldResult, **kwargs: Any) -> SyncOutcome:
+        return self._writer_runtime().publish_splits(gold, **kwargs)
+
+    def verify(self, *args: Any, **kwargs: Any) -> Any:
+        return self._writer_runtime().verify(*args, **kwargs)
+
+    def close(self) -> None:
+        self._admin.close()
+        if self._writer is not None:
+            self._writer.close()
+
+    def _writer_runtime(self) -> PostgresEodhdBootstrapRuntime:
+        if self._writer is None:
+            self._writer = PostgresEodhdBootstrapRuntime.from_environment()
+        return self._writer
+
+
 def execute_production_full_sync_and_verify(
     *,
     medallion_root: Path,
     output_path: Path,
+    backup_root: Path,
 ) -> ProductionAcceptanceReport:
     """Destructively bootstrap the real target, replay unchanged state, and verify independently."""
 
-    preflight = connect_postgres(admin=True)
-    try:
-        preflight.autocommit = True
-        _, _, _, target_matches = _verify_target(preflight)
-        if not target_matches:
-            raise ProductionVerificationError(
-                f"XDL_POSTGRES_DSN must resolve exactly to {EXPECTED_HOST}:{EXPECTED_PORT}"
-            )
-    finally:
-        preflight.close()
+    root = medallion_root.resolve()
+    _require_scheduler_disabled()
+    _require_private_backup_root(backup_root)
+    with LoaderLock(root / "authoritative-rewrite.lock"):
+        preflight = connect_postgres(admin=True)
+        try:
+            preflight.autocommit = True
+            _, _, _, target_matches = _verify_target(preflight)
+            if not target_matches:
+                raise ProductionVerificationError(
+                    "XDL_POSTGRES_ADMIN_DSN must resolve exactly to "
+                    f"{EXPECTED_HOST}:{EXPECTED_PORT}"
+                )
+        finally:
+            preflight.close()
 
-    initial_runtime = PostgresEodhdBootstrapRuntime.from_admin_environment()
-    try:
-        initial = run_full_bootstrap(initial_runtime, confirmed=True, reset_owned_state=True)
-        # The bootstrap schema initializer runs after the reset transaction. Explicitly commit
-        # its outer transaction so a fresh verification connection can prove durable state.
-        initial_runtime._connection.commit()
-    finally:
-        initial_runtime.close()
-
-    replay_runtime = PostgresEodhdBootstrapRuntime.from_admin_environment()
-    try:
-        replay = run_full_bootstrap(replay_runtime, confirmed=True, reset_owned_state=False)
-    finally:
-        replay_runtime.close()
-
-    connection = connect_postgres(admin=True)
-    try:
-        connection.autocommit = True
-        connection.execute("SET TIME ZONE 'UTC'")
-        report = verify_postgres_sync(
-            connection,
-            medallion_root=medallion_root,
-            initial=initial,
-            replay=replay,
+        _backup_owned_state(root, backup_root)
+        runtime = _AdminResetWriterPublishRuntime(
+            PostgresEodhdBootstrapRuntime.from_admin_environment(quarantine_invalid_ohlc=True)
         )
-    finally:
-        connection.close()
+        def worker_runtime() -> PostgresEodhdBootstrapRuntime:
+            return PostgresEodhdBootstrapRuntime.from_admin_environment(
+                quarantine_invalid_ohlc=True
+            )
+
+        try:
+            initial = run_full_bootstrap(
+                runtime,
+                confirmed=True,
+                reset_owned_state=True,
+                parallel_runtime_factory=worker_runtime,
+                max_workers=4,
+            )
+        finally:
+            runtime.close()
+
+        replay = run_restartable_pipeline(
+            build_weekly_stages(),
+            lock_path=root / "weekly.lock",
+            checkpoint_path=root / "weekly.checkpoint.json",
+        )
+        replay_mutations = _weekly_replay_mutations(replay.as_dict())
+
+        connection = connect_postgres(admin=True)
+        try:
+            connection.autocommit = True
+            connection.execute("SET TIME ZONE 'UTC'")
+            report = verify_postgres_sync(
+                connection,
+                medallion_root=root,
+                initial=initial,
+                replay_mutations=replay_mutations,
+            )
+        finally:
+            connection.close()
 
     write_production_report(report, output_path)
     if not report.passed:
@@ -289,7 +401,7 @@ def verify_postgres_sync(
     *,
     medallion_root: Path,
     initial: BootstrapResult,
-    replay: BootstrapResult,
+    replay_mutations: Mapping[str, int],
 ) -> ProductionAcceptanceReport:
     """Read PostgreSQL independently and compare it with validated Gold state."""
 
@@ -325,10 +437,6 @@ def verify_postgres_sync(
     committed_runs = {
         dataset: _run_is_committed(connection, outcome)
         for dataset, outcome in initial_outcomes.items()
-    }
-    replay_mutations = {
-        dataset: outcome.counters.total_mutations
-        for dataset, outcome in replay.sync_outcomes.items()
     }
     return ProductionAcceptanceReport(
         target_host=host,
@@ -440,6 +548,112 @@ def write_production_report(report: ProductionAcceptanceReport, path: Path) -> P
     return path
 
 
+def _require_scheduler_disabled() -> None:
+    """Refuse a destructive rewrite while the recurring writer can still start."""
+
+    result = subprocess.run(["crontab", "-l"], check=False, capture_output=True, text=True)
+    active = [
+        line
+        for line in result.stdout.splitlines()
+        if line.strip() and not line.lstrip().startswith("#") and "xdl-weekly" in line
+    ]
+    if active:
+        raise ProductionVerificationError("disable the recurring xdl-weekly cron entry first")
+
+
+def _require_private_backup_root(path: Path) -> None:
+    repository = Path.cwd().resolve()
+    resolved = path.resolve()
+    if resolved == repository or repository in resolved.parents:
+        raise ProductionVerificationError("backup root must be outside the repository")
+
+
+def _backup_owned_state(medallion_root: Path, backup_root: Path) -> None:
+    """Create a timestamped private schema/manifest backup before the owned reset."""
+
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    destination = backup_root.resolve() / f"xetra-loader-{stamp}"
+    destination.mkdir(parents=True, exist_ok=False)
+    _dump_owned_schemas(destination / "postgres.sql")
+    manifests = destination / "gold-manifests"
+    manifests.mkdir()
+    layout = MedallionLayout(medallion_root)
+    for dataset in DATASETS:
+        source = layout.manifest_path(Layer.GOLD, dataset)
+        if source.exists():
+            target = manifests / f"{dataset}.json"
+            target.write_bytes(source.read_bytes())
+    checksums = {
+        str(path.relative_to(destination)): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(destination.rglob("*"))
+        if path.is_file()
+    }
+    (destination / "checksums.json").write_text(
+        canonical_json(cast(JSONValue, checksums)) + "\n", encoding="utf-8"
+    )
+
+
+def _dump_owned_schemas(path: Path) -> None:
+    """Use libpq environment credentials so no password appears in the process arguments."""
+
+    values = conninfo_to_dict(resolve_postgres_admin_dsn())
+    password = values.pop("password", None)
+    host = values.get("host")
+    port = values.get("port")
+    user = values.get("user")
+    database = values.get("dbname") or values.get("database")
+    required = (host, port, user, database, password)
+    if not all(isinstance(value, str) and value for value in required):
+        raise ProductionVerificationError(
+            "admin connection must include host, port, user, database, password"
+        )
+    environment = {**os.environ, "PGPASSWORD": cast(str, password)}
+    command = [
+        "pg_dump",
+        f"--host={host}",
+        f"--port={port}",
+        f"--username={user}",
+        f"--dbname={database}",
+        "--format=custom",
+        "--schema=xetra_loader",
+        "--schema=xetra_loader_sync",
+        f"--file={path}",
+    ]
+    subprocess.run(command, check=True, env=environment, capture_output=True, text=True)
+
+
+def _weekly_replay_mutations(summary: Mapping[str, JSONValue]) -> dict[str, int]:
+    stages = summary.get("stages")
+    if not isinstance(stages, list):
+        raise ProductionVerificationError("weekly replay produced no stage summary")
+    names = {
+        "postgres_listings_sync": "listings",
+        "postgres_quotes_sync": "eod_quotes",
+        "postgres_dividends_sync": "dividends",
+        "postgres_splits_sync": "splits",
+    }
+    result: dict[str, int] = {}
+    for stage in stages:
+        if not isinstance(stage, dict):
+            raise ProductionVerificationError("weekly replay summary is invalid")
+        stage_name = stage.get("name")
+        if not isinstance(stage_name, str):
+            raise ProductionVerificationError("weekly replay summary is invalid")
+        dataset = names.get(stage_name)
+        if dataset is None:
+            continue
+        details = stage.get("details")
+        if not isinstance(details, dict):
+            raise ProductionVerificationError("weekly replay sync details are invalid")
+        values = [details.get(field) for field in ("inserted", "updated", "deleted", "retracted")]
+        if not all(isinstance(value, int) for value in values):
+            raise ProductionVerificationError("weekly replay mutation counts are invalid")
+        result[dataset] = sum(cast(list[int], values))
+    if set(result) != set(DATASETS):
+        raise ProductionVerificationError("weekly replay did not synchronize every dataset")
+    return result
+
+
 def _verify_target(connection: Connection[Any]) -> tuple[str, int, tuple[str, ...], bool]:
     host = str(connection.info.host)
     port = int(connection.info.port)
@@ -476,7 +690,7 @@ def _fetch_semantic_rows(
 ) -> tuple[dict[str, JSONValue], ...]:
     queries = {
         "listings": (
-            "SELECT isin, exchange, code, name, instrument_type, currency, country "
+            "SELECT isin, exchange, code, name, instrument_type, currency, country, is_active "
             "FROM xetra_loader.listings ORDER BY isin, exchange, code"
         ),
         "eod_quotes": (
@@ -515,6 +729,7 @@ def _listing_row(row: Sequence[object]) -> dict[str, JSONValue]:
         "instrument_type": _optional_text(row[4]),
         "currency": _optional_text(row[5]),
         "country": _optional_text(row[6]),
+        "is_active": bool(cast(bool, row[7])),
     }
 
 
@@ -780,8 +995,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("artifacts/acceptance/postgres-full-sync.json"),
+        default=Path("artifacts/acceptance/postgres-full-sync-v2.json"),
     )
+    parser.add_argument("--backup-root", type=Path, required=True)
     return parser
 
 
@@ -805,6 +1021,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     report = execute_production_full_sync_and_verify(
         medallion_root=Path(medallion_root_value),
         output_path=args.output,
+        backup_root=args.backup_root,
     )
     print(canonical_json(report.as_dict()))
     return 0

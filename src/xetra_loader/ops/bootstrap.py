@@ -6,7 +6,8 @@ import argparse
 import hashlib
 import json
 import time
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -234,11 +235,17 @@ def run_full_bootstrap(
     *,
     confirmed: bool,
     reset_owned_state: bool = True,
+    parallel_runtime_factory: Callable[[], BootstrapRuntime] | None = None,
+    max_workers: int = 1,
 ) -> BootstrapResult:
     """Load every valid XETRA identity and every available history, then verify publication."""
 
     if not confirmed:
         raise DestructiveConfirmationRequired("--confirm-destructive-reset is required")
+    if max_workers < 1:
+        raise ValueError("max_workers must be positive")
+    if max_workers > 1 and parallel_runtime_factory is None:
+        raise ValueError("parallel bootstrap requires a runtime factory")
     if reset_owned_state:
         runtime.reset_owned_state()
 
@@ -246,17 +253,26 @@ def run_full_bootstrap(
     listing_batch = runtime.fetch_listings()
     metrics += listing_batch.metrics
     listing_gold = build_listing_gold(listing_batch.rows)
+    listing_fetch_times = _batch_fetch_times(listing_batch)
 
     quotes: list[QuoteRecord] = []
     dividends: list[DividendEvent] = []
     splits: list[SplitEvent] = []
-    for listing in listing_gold.rows:
-        quote_batch = runtime.fetch_quotes(listing)
-        dividend_batch = runtime.fetch_dividends(listing)
-        split_batch = runtime.fetch_splits(listing)
+    quote_fetch_times: dict[tuple[str, str, str, date], datetime] = {}
+    dividend_fetch_times: dict[tuple[str, str, str, str], datetime] = {}
+    split_fetch_times: dict[tuple[str, str, str, str], datetime] = {}
+    for _listing, quote_batch, dividend_batch, split_batch in _fetch_listing_batches(
+        runtime,
+        listing_gold.rows,
+        parallel_runtime_factory=parallel_runtime_factory,
+        max_workers=max_workers,
+    ):
         quotes.extend(quote_batch.rows)
         dividends.extend(dividend_batch.rows)
         splits.extend(split_batch.rows)
+        quote_fetch_times.update(_batch_fetch_times(quote_batch))
+        dividend_fetch_times.update(_batch_fetch_times(dividend_batch))
+        split_fetch_times.update(_batch_fetch_times(split_batch))
         metrics += quote_batch.metrics + dividend_batch.metrics + split_batch.metrics
 
     quote_gold = build_quote_gold(quotes)
@@ -265,10 +281,10 @@ def run_full_bootstrap(
     _persist_all_gold(runtime, listing_gold, quote_gold, dividend_gold, split_gold)
 
     sync_outcomes = {
-        "listings": runtime.publish_listings(listing_gold),
-        "eod_quotes": runtime.publish_quotes(quote_gold),
-        "dividends": runtime.publish_dividends(dividend_gold),
-        "splits": runtime.publish_splits(split_gold),
+        "listings": _publish_listings(runtime, listing_gold, listing_fetch_times),
+        "eod_quotes": _publish_quotes(runtime, quote_gold, quote_fetch_times),
+        "dividends": _publish_dividends(runtime, dividend_gold, dividend_fetch_times),
+        "splits": _publish_splits(runtime, split_gold, split_fetch_times),
     }
     verification = runtime.verify(
         listing_gold,
@@ -288,6 +304,118 @@ def run_full_bootstrap(
         split_gold=split_gold,
         sync_outcomes=sync_outcomes,
         verification=verification,
+    )
+
+
+def _fetch_listing_batches(
+    runtime: BootstrapRuntime,
+    listings: Sequence[ListingRecord],
+    *,
+    parallel_runtime_factory: Callable[[], BootstrapRuntime] | None,
+    max_workers: int,
+) -> Iterable[
+    tuple[
+        ListingRecord,
+        FetchBatch[QuoteRecord],
+        FetchBatch[DividendEvent],
+        FetchBatch[SplitEvent],
+    ]
+]:
+    """Fetch independent listing histories in stable order, with isolated worker state."""
+
+    if max_workers == 1:
+        return tuple(_fetch_one_listing(runtime, listing) for listing in listings)
+    if parallel_runtime_factory is None:
+        raise ValueError("parallel bootstrap requires a runtime factory")
+
+    def fetch_with_worker(
+        listing: ListingRecord,
+    ) -> tuple[
+        ListingRecord,
+        FetchBatch[QuoteRecord],
+        FetchBatch[DividendEvent],
+        FetchBatch[SplitEvent],
+    ]:
+        worker = parallel_runtime_factory()
+        try:
+            return _fetch_one_listing(worker, listing)
+        finally:
+            worker.close()
+
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="xdl-fetch") as executor:
+        return tuple(executor.map(fetch_with_worker, listings))
+
+
+def _fetch_one_listing(
+    runtime: BootstrapRuntime,
+    listing: ListingRecord,
+) -> tuple[
+    ListingRecord,
+    FetchBatch[QuoteRecord],
+    FetchBatch[DividendEvent],
+    FetchBatch[SplitEvent],
+]:
+    return (
+        listing,
+        runtime.fetch_quotes(listing),
+        runtime.fetch_dividends(listing),
+        runtime.fetch_splits(listing),
+    )
+
+
+def _batch_fetch_times(batch: FetchBatch[Any]) -> dict[Any, datetime]:
+    """Associate every fetched semantic row with its measured provider response time."""
+
+    if batch.fetched_at_utc is None:
+        return {}
+    return {row.key: batch.fetched_at_utc for row in batch.rows}
+
+
+def _publish_listings(
+    runtime: BootstrapRuntime,
+    gold: ListingGoldResult,
+    fetched_at_by_key: Mapping[tuple[str, str, str], datetime],
+) -> SyncOutcome:
+    return (
+        runtime.publish_listings(gold, fetched_at_by_key=fetched_at_by_key)
+        if fetched_at_by_key
+        else runtime.publish_listings(gold)
+    )
+
+
+def _publish_quotes(
+    runtime: BootstrapRuntime,
+    gold: QuoteGoldResult,
+    fetched_at_by_key: Mapping[tuple[str, str, str, date], datetime],
+) -> SyncOutcome:
+    return (
+        runtime.publish_quotes(gold, fetched_at_by_key=fetched_at_by_key)
+        if fetched_at_by_key
+        else runtime.publish_quotes(gold)
+    )
+
+
+def _publish_dividends(
+    runtime: BootstrapRuntime,
+    gold: DividendGoldResult,
+    fetched_at_by_key: Mapping[tuple[str, str, str, str], datetime],
+) -> SyncOutcome:
+    return (
+        runtime.publish_dividends(gold, fetched_at_by_key=fetched_at_by_key)
+        if fetched_at_by_key
+        else runtime.publish_dividends(gold)
+    )
+
+
+def _publish_splits(
+    runtime: BootstrapRuntime,
+    gold: SplitGoldResult,
+    fetched_at_by_key: Mapping[tuple[str, str, str, str], datetime],
+) -> SyncOutcome:
+    return (
+        runtime.publish_splits(gold, fetched_at_by_key=fetched_at_by_key)
+        if fetched_at_by_key
+        else runtime.publish_splits(gold)
     )
 
 
@@ -373,11 +501,13 @@ class PostgresEodhdBootstrapRuntime:
         transport: _MeasuredTransport,
         medallion_root: Path,
         repository_root: Path,
+        quarantine_invalid_ohlc: bool = False,
     ) -> None:
         self._connection = connection
         self._transport = transport
         self._layout = MedallionLayout(medallion_root.resolve())
         self._repository_root = repository_root.resolve()
+        self._quarantine_invalid_ohlc = quarantine_invalid_ohlc
 
     @classmethod
     def from_environment(cls) -> PostgresEodhdBootstrapRuntime:
@@ -390,13 +520,18 @@ class PostgresEodhdBootstrapRuntime:
         )
 
     @classmethod
-    def from_admin_environment(cls) -> PostgresEodhdBootstrapRuntime:
+    def from_admin_environment(
+        cls,
+        *,
+        quarantine_invalid_ohlc: bool = False,
+    ) -> PostgresEodhdBootstrapRuntime:
         root = resolve_medallion_root()
         return cls(
             connection=connect_postgres(admin=True),
             transport=_MeasuredTransport(),
             medallion_root=Path(root),
             repository_root=Path.cwd(),
+            quarantine_invalid_ohlc=quarantine_invalid_ohlc,
         )
 
     def reset_owned_state(self) -> None:
@@ -431,6 +566,7 @@ class PostgresEodhdBootstrapRuntime:
             listing,
             last_business_date=last_business_date,
             previous_records=previous_records,
+            quarantine_invalid_ohlc=self._quarantine_invalid_ohlc,
         )
         metrics = self._measurement_finish(before, len(result.silver_records))
         self._record_partition_bronze("eod_quotes", listing, result.bronze_payload)

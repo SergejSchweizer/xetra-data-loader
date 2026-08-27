@@ -71,6 +71,11 @@ def connect_postgres(
         if row is None or bool(row[0]):
             connection.close()
             raise PermissionError("weekly PostgreSQL connection must not use a superuser")
+        # The probe above starts a transaction on psycopg connections with
+        # autocommit disabled.  End it before callers open their own
+        # transaction blocks; otherwise ``connection.transaction()`` creates
+        # a savepoint and a later close can roll back the publication.
+        connection.commit()
     return connection
 
 
