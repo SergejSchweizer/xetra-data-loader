@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import yaml
 
@@ -65,7 +65,8 @@ def resolve_postgres_writer_dsn(explicit: str | None = None) -> str:
     section = _section(load_file_configuration().values, "postgres")
     configured_dsn = _string(section, "writer_dsn") or _string(section, "dsn")
     if configured_dsn:
-        return configured_dsn
+        database = _string(section, "database")
+        return _with_database(configured_dsn, database) if database else configured_dsn
 
     host = _string(section, "host")
     user = _string(section, "user")
@@ -88,7 +89,17 @@ def resolve_postgres_admin_dsn(explicit: str | None = None) -> str:
     configured = _string(_section(load_file_configuration().values, "postgres"), "admin_dsn")
     if configured and configured.strip():
         return configured.strip()
-    raise ValueError("XDL_POSTGRES_ADMIN_DSN is required for bootstrap or migrations")
+
+    section = _section(load_file_configuration().values, "postgres")
+    host = _string(section, "host")
+    user = _string(section, "user")
+    password = _string(section, "password")
+    port = _port(section.get("port", 5432))
+    database = _string(section, "database")
+    if not host or not user or not password or not database:
+        raise ValueError("XDL_POSTGRES_ADMIN_DSN is required for bootstrap or migrations")
+    authority = f"{quote(user, safe='')}:{quote(password, safe='')}@{host}:{port}"
+    return f"postgresql://{authority}/{quote(database, safe='')}"
 
 
 def resolve_postgres_dsn(explicit: str | None = None) -> str:
@@ -111,6 +122,21 @@ def resolve_medallion_root(explicit: str | None = None) -> str:
 def _section(values: Mapping[str, Any], name: str) -> Mapping[str, Any]:
     section = values.get(name)
     return cast(Mapping[str, Any], section) if isinstance(section, Mapping) else {}
+
+
+def _with_database(dsn: str, database: str) -> str:
+    parsed = urlsplit(dsn)
+    if not parsed.scheme or not parsed.netloc:
+        raise ConfigurationError("postgres.writer_dsn must be a PostgreSQL URI")
+    return urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            f"/{quote(database, safe='')}",
+            parsed.query,
+            parsed.fragment,
+        )
+    )
 
 
 def _string(values: Mapping[str, Any], name: str) -> str | None:
