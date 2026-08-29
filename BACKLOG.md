@@ -1,4 +1,4 @@
-Last reviewed: 2026-08-22
+Last reviewed: 2026-08-29
 
 # XETRA Data Loader — Atomic Parallel Backlog
 
@@ -548,26 +548,26 @@ Safe parallel start after PR034: PR035, PR036, PR037, PR041, PR043, PR044, and P
 
 | ID | Work-order | Branch | Depends on | Atomic result | Status |
 | --- | --- | --- | --- | --- | --- |
-| PR034 | `xdl-pr034-audit-corrective-backlog` | `docs/xdl-pr034-audit-corrective-backlog` | current `main` | audited corrective authority | this planning change |
-| PR035 | `xdl-pr035-repository-governance-repair` | `chore/xdl-pr035-repository-governance-repair` | PR034 | protected-main/auto-merge restored and proven | backlog |
-| PR036 | `xdl-pr036-real-postgres-ci` | `ci/xdl-pr036-real-postgres-ci` | PR034 | real PostgreSQL integration tests mandatory in CI | backlog |
-| PR037 | `xdl-pr037-scheduler-contract-reconciliation` | `fix/xdl-pr037-scheduler-contract-reconciliation` | PR034 | one exact Sunday 08:00 contract everywhere | backlog |
-| PR038 | `xdl-pr038-production-weekly-runner-wiring` | `fix/xdl-pr038-production-weekly-runner-wiring` | PR037 | scheduled path is guarded weekly runner, never destructive bootstrap | backlog |
-| PR039 | `xdl-pr039-restart-state-rehydration` | `fix/xdl-pr039-restart-state-rehydration` | PR038 | real cross-process restart from persisted state | backlog |
-| PR040 | `xdl-pr040-incremental-weekly-refresh` | `fix/xdl-pr040-incremental-weekly-refresh` | PR039 | seven-day merged weekly refresh actually used | backlog |
-| PR041 | `xdl-pr041-corporate-action-set-reconciliation` | `fix/xdl-pr041-corporate-action-set-reconciliation` | PR034 | same-date multiple corporate actions supported | backlog |
-| PR042 | `xdl-pr042-adjusted-close-retroactive-reconciliation` | `fix/xdl-pr042-adjusted-close-retroactive-reconciliation` | PR040+PR041 | corporate-action changes trigger affected full quote reconciliation | backlog |
-| PR043 | `xdl-pr043-provider-secret-safe-errors` | `fix/xdl-pr043-provider-secret-safe-errors` | PR034 | provider tokens cannot leak through tracebacks/errors | backlog |
-| PR044 | `xdl-pr044-provider-numeric-integrity` | `fix/xdl-pr044-provider-numeric-integrity` | PR034 | exact Decimal/canonical numeric semantics and validation | backlog |
-| PR045 | `xdl-pr045-gold-cross-dataset-validation` | `fix/xdl-pr045-gold-cross-dataset-validation` | PR034 | Gold proves child-to-listing referential integrity | backlog |
-| PR046 | `xdl-pr046-corporate-action-gold-tombstones` | `fix/xdl-pr046-corporate-action-gold-tombstones` | PR041+PR044 | persisted Gold fully represents retractions | backlog |
-| PR047 | `xdl-pr047-atomic-streamed-medallion-persistence` | `refactor/xdl-pr047-atomic-streamed-medallion-persistence` | PR046 | bounded-memory, atomic medallion writes | backlog |
-| PR048 | `xdl-pr048-listing-lifecycle-contract` | `feat/xdl-pr048-listing-lifecycle-contract` | PR043+PR044 | active+delisted XETRA lifecycle is explicit | backlog |
-| PR049 | `xdl-pr049-listing-lifecycle-postgres-migration` | `feat/xdl-pr049-listing-lifecycle-postgres-migration` | PR048 | lifecycle field propagated through Gold/PostgreSQL | backlog |
-| PR050 | `xdl-pr050-authoritative-postgres-reconciliation` | `fix/xdl-pr050-authoritative-postgres-reconciliation` | PR040+PR045+PR046+PR049 | PostgreSQL exactly reconciles to full merged Gold | backlog |
-| PR051 | `xdl-pr051-runtime-role-hardening` | `fix/xdl-pr051-runtime-role-hardening` | PR035+PR036 | weekly runtime uses non-superuser writer permissions | backlog |
-| PR052 | `xdl-pr052-fetch-publication-provenance` | `fix/xdl-pr052-fetch-publication-provenance` | PR040+PR051 | fetch and publication timestamps have exact meanings | backlog |
-| PR053 | `xdl-pr053-postgres-authoritative-rewrite` | `chore/xdl-pr053-postgres-authoritative-rewrite` | PR035-PR052 | backup, full rewrite, independent real-target PASS | backlog/final gate |
+| PR034 | `xdl-pr034-audit-corrective-backlog` | `docs/xdl-pr034-audit-corrective-backlog` | current `main` | audited corrective authority | merged in `origin/main` |
+| PR035 | `xdl-pr035-repository-governance-repair` | `chore/xdl-pr035-repository-governance-repair` | PR034 | protected-main/auto-merge restored and proven | merged in `origin/main` |
+| PR036 | `xdl-pr036-real-postgres-ci` | `ci/xdl-pr036-real-postgres-ci` | PR034 | real PostgreSQL integration tests mandatory in CI | merged in `origin/main` |
+| PR037 | `xdl-pr037-scheduler-contract-reconciliation` | `fix/xdl-pr037-scheduler-contract-reconciliation` | PR034 | one exact Sunday 08:00 contract everywhere | merged in `origin/main` |
+| PR038 | `xdl-pr038-production-weekly-runner-wiring` | `fix/xdl-pr038-production-weekly-runner-wiring` | PR037 | scheduled path is guarded weekly runner, never destructive bootstrap | merged in `origin/main` |
+| PR039 | `xdl-pr039-restart-state-rehydration` | `fix/xdl-pr039-restart-state-rehydration` | PR038 | real cross-process restart from persisted state | merged in `origin/main` |
+| PR040 | `xdl-pr040-incremental-weekly-refresh` | `fix/xdl-pr040-incremental-weekly-refresh` | PR039 | seven-day merged weekly refresh actually used | merged in `origin/main` |
+| PR041 | `xdl-pr041-corporate-action-set-reconciliation` | `fix/xdl-pr041-corporate-action-set-reconciliation` | PR034 | same-date multiple corporate actions supported | merged in `origin/main` |
+| PR042 | `xdl-pr042-adjusted-close-retroactive-reconciliation` | `fix/xdl-pr042-adjusted-close-retroactive-reconciliation` | PR040+PR041 | corporate-action changes trigger affected full quote reconciliation | merged in `origin/main` |
+| PR043 | `xdl-pr043-provider-secret-safe-errors` | `fix/xdl-pr043-provider-secret-safe-errors` | PR034 | provider tokens cannot leak through tracebacks/errors | merged in `origin/main` |
+| PR044 | `xdl-pr044-provider-numeric-integrity` | `fix/xdl-pr044-provider-numeric-integrity` | PR034 | exact Decimal/canonical numeric semantics and validation | merged in `origin/main` |
+| PR045 | `xdl-pr045-gold-cross-dataset-validation` | `fix/xdl-pr045-gold-cross-dataset-validation` | PR034 | Gold proves child-to-listing referential integrity | merged in `origin/main` |
+| PR046 | `xdl-pr046-corporate-action-gold-tombstones` | `fix/xdl-pr046-corporate-action-gold-tombstones` | PR041+PR044 | persisted Gold fully represents retractions | merged in `origin/main` |
+| PR047 | `xdl-pr047-atomic-streamed-medallion-persistence` | `refactor/xdl-pr047-atomic-streamed-medallion-persistence` | PR046 | bounded-memory, atomic medallion writes | merged in `origin/main` |
+| PR048 | `xdl-pr048-listing-lifecycle-contract` | `feat/xdl-pr048-listing-lifecycle-contract` | PR043+PR044 | active+delisted XETRA lifecycle is explicit | merged in `origin/main` |
+| PR049 | `xdl-pr049-listing-lifecycle-postgres-migration` | `feat/xdl-pr049-listing-lifecycle-postgres-migration` | PR048 | lifecycle field propagated through Gold/PostgreSQL | merged in `origin/main` |
+| PR050 | `xdl-pr050-authoritative-postgres-reconciliation` | `fix/xdl-pr050-authoritative-postgres-reconciliation` | PR040+PR045+PR046+PR049 | PostgreSQL exactly reconciles to full merged Gold | merged in `origin/main` |
+| PR051 | `xdl-pr051-runtime-role-hardening` | `fix/xdl-pr051-runtime-role-hardening` | PR035+PR036 | weekly runtime uses non-superuser writer permissions | merged in `origin/main` |
+| PR052 | `xdl-pr052-fetch-publication-provenance` | `fix/xdl-pr052-fetch-publication-provenance` | PR040+PR051 | fetch and publication timestamps have exact meanings | merged in `origin/main` |
+| PR053 | `xdl-pr053-postgres-authoritative-rewrite` | `chore/xdl-pr053-postgres-authoritative-rewrite` | PR035-PR052 | backup, full rewrite, independent real-target PASS | implementation merged; real-target V2 replay/checkpoint pending |
 
 ### 10.5 Exact corrective PR specifications
 
@@ -810,3 +810,11 @@ Acceptance:
 The completion claims in Sections 7 and 9 are superseded. XDL-PR033 and the existing fixture acceptance artifact are historical evidence only and are **not sufficient for cutover**.
 
 `xetra-loader` is complete only when PR035-PR052 are merged under repaired governance and PR053's real-target V2 rewrite/verification is `PASS`. Until then, Portfell may read the documented schema for development but must not treat the database as a fully reconciled production contract.
+
+### 10.7 Operational status — reviewed 2026-08-29
+
+- PR034 through PR052 are merged in `origin/main`.
+- PR053's guarded rewrite implementation is merged. The initial publication, dedicated `xetra_loader` database migration, and action replay completed; the real-target V2 report remains absent because the resumed quote stage was interrupted before completion.
+- Follow-up fixes merged after PR053: PR055 dedicated database configuration, PR056 empty-target backup handling, PR057 action replay key deduplication, and PR058 weekly invalid-OHLC quarantine.
+- The restart checkpoint records completed `listings`, `dividends`, and `splits` stages. Resume performs full quote-history fetches only for the `1,336` listing union with corporate-action changes and seven-day overlap fetches for other active listings.
+- The recurring cron remains disabled until the sanitized `artifacts/acceptance/postgres-full-sync-v2.json` report is present and marked `PASS`.
