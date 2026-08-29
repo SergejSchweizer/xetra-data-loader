@@ -413,16 +413,18 @@ def verify_postgres_sync(
     for dataset in DATASETS:
         gold_snapshot = gold[dataset]
         db_rows = postgres_rows[dataset]
-        gold_keys = {_business_key(dataset, row) for row in gold_snapshot.rows}
-        db_keys = {_business_key(dataset, row) for row in db_rows}
+        missing_keys, extra_keys = _key_differences(
+            (_business_key(dataset, row) for row in gold_snapshot.rows),
+            (_business_key(dataset, row) for row in db_rows),
+        )
         gold_min, gold_max = _date_bounds(dataset, gold_snapshot.rows)
         db_min, db_max = _date_bounds(dataset, db_rows)
         datasets[dataset] = DatasetVerification(
             source_count=gold_snapshot.source_count,
             gold_count=gold_snapshot.row_count,
             postgres_count=len(db_rows),
-            missing_keys=len(gold_keys - db_keys),
-            extra_keys=len(db_keys - gold_keys),
+            missing_keys=missing_keys,
+            extra_keys=extra_keys,
             duplicate_keys=_duplicate_key_count(connection, dataset),
             gold_fingerprint=gold_snapshot.computed_fingerprint,
             postgres_fingerprint=semantic_fingerprint(dataset, db_rows),
@@ -817,6 +819,33 @@ def _business_key(dataset: str, row: Mapping[str, JSONValue]) -> tuple[str, ...]
     return tuple(values)
 
 
+def _key_differences(
+    expected: Iterable[tuple[str, ...]],
+    actual: Iterable[tuple[str, ...]],
+) -> tuple[int, int]:
+    """Compare sorted keys without materializing full datasets in memory."""
+
+    expected_iterator = iter(expected)
+    actual_iterator = iter(actual)
+    expected_key = next(expected_iterator, None)
+    actual_key = next(actual_iterator, None)
+    missing = 0
+    extra = 0
+    while expected_key is not None and actual_key is not None:
+        if expected_key == actual_key:
+            expected_key = next(expected_iterator, None)
+            actual_key = next(actual_iterator, None)
+        elif expected_key < actual_key:
+            missing += 1
+            expected_key = next(expected_iterator, None)
+        else:
+            extra += 1
+            actual_key = next(actual_iterator, None)
+    missing += sum(1 for _ in expected_iterator) + int(expected_key is not None)
+    extra += sum(1 for _ in actual_iterator) + int(actual_key is not None)
+    return missing, extra
+
+
 def _date_bounds(
     dataset: str,
     rows: Sequence[Mapping[str, JSONValue]],
@@ -999,7 +1028,7 @@ def _optional_text(value: object) -> str | None:
 def _decimal_text(value: object) -> str | None:
     if value is None:
         return None
-    return str(cast(Decimal, value))
+    return format(cast(Decimal, value).normalize(), "f")
 
 
 def _date_text(value: object) -> str | None:

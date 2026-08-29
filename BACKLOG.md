@@ -567,7 +567,7 @@ Safe parallel start after PR034: PR035, PR036, PR037, PR041, PR043, PR044, and P
 | PR050 | `xdl-pr050-authoritative-postgres-reconciliation` | `fix/xdl-pr050-authoritative-postgres-reconciliation` | PR040+PR045+PR046+PR049 | PostgreSQL exactly reconciles to full merged Gold | merged in `origin/main` |
 | PR051 | `xdl-pr051-runtime-role-hardening` | `fix/xdl-pr051-runtime-role-hardening` | PR035+PR036 | weekly runtime uses non-superuser writer permissions | merged in `origin/main` |
 | PR052 | `xdl-pr052-fetch-publication-provenance` | `fix/xdl-pr052-fetch-publication-provenance` | PR040+PR051 | fetch and publication timestamps have exact meanings | merged in `origin/main` |
-| PR053 | `xdl-pr053-postgres-authoritative-rewrite` | `chore/xdl-pr053-postgres-authoritative-rewrite` | PR035-PR052 | backup, full rewrite, independent real-target PASS | implementation merged; real-target V2 replay/checkpoint pending |
+| PR053 | `xdl-pr053-postgres-authoritative-rewrite` | `chore/xdl-pr053-postgres-authoritative-rewrite` | PR035-PR052 | backup, full rewrite, independent real-target PASS | complete; sanitized real-target V2 report is PASS |
 
 ### 10.5 Exact corrective PR specifications
 
@@ -814,7 +814,7 @@ The completion claims in Sections 7 and 9 are superseded. XDL-PR033 and the exis
 ### 10.7 Operational status — reviewed 2026-08-29
 
 - PR034 through PR052 are merged in `origin/main`.
-- PR053's guarded rewrite implementation is merged. The initial publication, dedicated `xetra_loader` database migration, and action replay completed; the real-target V2 report remains absent because the resumed quote stage was interrupted before completion.
+- PR053 is complete: `artifacts/acceptance/postgres-full-sync-v2.json` is a sanitized real-target `PASS` report. The no-quote recovery rebuilt Gold quotes from the restored PostgreSQL serving state, refreshed corporate actions from the provider, and independently verified all serving datasets against Gold.
 - Follow-up fixes merged after PR053: PR055 dedicated database configuration, PR056 empty-target backup handling, PR057 action replay key deduplication, and PR058 weekly invalid-OHLC quarantine.
 - The restart checkpoint records completed `listings`, `dividends`, and `splits` stages. Resume performs full quote-history fetches only for the `1,336` listing union with corporate-action changes and seven-day overlap fetches for other active listings.
-- The recurring cron remains disabled until the sanitized `artifacts/acceptance/postgres-full-sync-v2.json` report is present and marked `PASS`.
+- The recurring cron is enabled as `CRON_TZ=Europe/Vienna`, Sunday 08:00, and invokes the guarded `xdl-weekly` runner.

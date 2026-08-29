@@ -28,6 +28,8 @@ from xetra_loader.ops.verify_postgres_sync import (
     ProductionAcceptanceReport,
     RoleVerification,
     TimestampVerification,
+    _decimal_text,
+    _key_differences,
     load_gold_snapshots,
     semantic_fingerprint,
     write_production_report,
@@ -197,6 +199,17 @@ def test_gold_persistence_writes_sorted_tombstone_sidecar(tmp_path: Path) -> Non
     assert manifest["semantic_metadata"]["retractions_fingerprint"] == hashlib.sha256(
         canonical_json([list(key) for key in sorted(retracted)]).encode("utf-8")
     ).hexdigest()
+
+
+def test_key_differences_streams_sorted_keys() -> None:
+    assert _key_differences(
+        iter((("A",), ("B",), ("D",))),
+        iter((("A",), ("C",), ("D",), ("E",))),
+    ) == (1, 2)
+
+
+def test_decimal_text_normalizes_postgres_numeric_scale() -> None:
+    assert _decimal_text(Decimal("0.000010")) == "0.00001"
 
 
 def _passing_dataset() -> DatasetVerification:
